@@ -2,13 +2,13 @@
   "name": "cup-pong",
   "version": "1.0.0",
   "dependencies": {
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
-    "three": "latest",
-    "@react-three/fiber": "latest",
-    "@react-three/drei": "latest",
-    "@react-three/cannon": "latest"
+    "three": "^0.160.0",
+    "@react-three/fiber": "^8.15.16",
+    "@react-three/drei": "^9.99.0",
+    "@react-three/cannon": "^6.6.0"
   },
   "scripts": {
     "start": "react-scripts start",
