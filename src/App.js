@@ -10,7 +10,7 @@ function Floor() {
     position: [0, -0.1, 0] 
   }));
   return (
-    <mesh ref={ref as any} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]}>
+    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]}>
       <circleGeometry args={[4, 64]} />
       <meshStandardMaterial color="#333" />
     </mesh>
@@ -28,7 +28,7 @@ function PingPongBall() {
 
   return (
     <mesh 
-      ref={ref as any} 
+      ref={ref} 
       onClick={() => api.position.set(0, 5, 0)}
     >
       <sphereGeometry args={[0.15, 32, 32]} />
@@ -38,7 +38,7 @@ function PingPongBall() {
 }
 
 // 3. A Single Cup
-function Cup({ position, color }: any) {
+function Cup({ position, color }) {
   const [ref] = useCylinder(() => ({
     mass: 0.2, 
     position: position,
@@ -46,7 +46,7 @@ function Cup({ position, color }: any) {
   }));
 
   return (
-    <mesh ref={ref as any}>
+    <mesh ref={ref}>
       <cylinderGeometry args={[0.25, 0.15, 0.6, 32]} />
       <meshStandardMaterial color={color} />
     </mesh>
@@ -54,7 +54,7 @@ function Cup({ position, color }: any) {
 }
 
 // 4. The Rack
-function CupRack({ position, rotation, color }: any) {
+function CupRack({ position, rotation, color }) {
   const cups = [];
   let k = 0;
   for (let row = 0; row < 4; row++) {
