@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Physics, useSphere, usePlane, useCylinder } from "@react-three/cannon";
+import * as THREE from "three";
 
 // 1. The Floor
 function Floor() {
@@ -83,8 +84,8 @@ function PingPongBall({ resetTrigger }) {
   );
 }
 
-// 3. The Static Cup
-function Cup({ position, rotation, color }) {
+// 3. The Static Cup (with optional logo texture)
+function Cup({ position, rotation, color, logo }) {
   const [ref] = useCylinder(() => ({
     mass: 0, // Static = Immovable (like a wall)
     position: position,
@@ -92,16 +93,44 @@ function Cup({ position, rotation, color }) {
     args: [0.25, 0.15, 0.6, 16],
   }));
 
+  const [texture, setTexture] = useState(null);
+
+  useEffect(() => {
+    if (!logo) return;
+    let tex = null;
+    let cancelled = false;
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      logo,
+      (t) => {
+        if (cancelled) { t.dispose(); return; }
+        tex = t;
+        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        setTexture(tex);
+      },
+      undefined,
+      () => { if (!cancelled) setTexture(null); }
+    );
+    return () => {
+      cancelled = true;
+      if (tex) tex.dispose();
+    };
+  }, [logo]);
+
   return (
     <mesh ref={ref}>
       <cylinderGeometry args={[0.25, 0.15, 0.6, 32]} />
-      <meshStandardMaterial color={color} />
+      <meshStandardMaterial
+        color={texture ? "#ffffff" : color}
+        map={texture || undefined}
+      />
     </mesh>
   );
 }
 
 // 4. The Rack (Now with World Coordinate Math)
-function CupRack({ angle, color }) {
+function CupRack({ angle, color, logo }) {
   const cups = [];
   let k = 0;
   
@@ -135,7 +164,8 @@ function CupRack({ angle, color }) {
           key={k++} 
           position={[worldX, 0.2, worldZ]} 
           rotation={[0, -angle, 0]} // Rotate the cup to match the rack
-          color={color} 
+          color={color}
+          logo={logo}
         />
       );
     }
@@ -162,9 +192,9 @@ export default function App() {
              2*PI/3 = 120 degrees
              4*PI/3 = 240 degrees
           */}
-          <CupRack angle={0} color="#ff4444" /> 
-          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" /> 
-          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" /> 
+          <CupRack angle={0} color="#ff4444" logo="/logos/placeholder-red.svg" /> 
+          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" logo="/logos/placeholder-blue.svg" /> 
+          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" logo="/logos/placeholder-green.svg" /> 
 
         </Physics>
       </Canvas>

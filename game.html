@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cup Pong</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; width: 100%; background: #222; touch-action: none; overflow: hidden; }
+    #game { display: block; width: 100%; height: 100%; }
+    #reset {
+      position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+      padding: 15px 30px; font-size: 20px; background: white; border: none;
+      border-radius: 50px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      cursor: pointer; font-weight: bold; pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <button id="reset">Reset Ball</button>
+
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+  <script>
+(function () {
+  'use strict';
+
+  var DISTANCE_FROM_CENTER = 2.0, SPACING = 0.52, ROW_OFFSET = SPACING * Math.sqrt(3) / 2;
+
+  var canvas = document.getElementById('game');
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(0, 8, 12);
+  camera.lookAt(0, 0, 0);
+
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  var light = new THREE.PointLight(0xffffff, 1);
+  light.position.set(10, 10, 10);
+  scene.add(light);
+
+  var world = new CANNON.World();
+  world.gravity.set(0, -9.8, 0);
+  world.broadphase = new CANNON.NaiveBroadphase();
+  world.solver.iterations = 20;
+
+  var floorGeom = new THREE.CircleGeometry(10, 64);
+  var floorMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  var floorMesh = new THREE.Mesh(floorGeom, floorMat);
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -0.1;
+  scene.add(floorMesh);
+  var floorBody = new CANNON.Body({ mass: 0 });
+  floorBody.addShape(new CANNON.Plane());
+  floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  floorBody.position.set(0, -0.1, 0);
+  world.addBody(floorBody);
+
+  var ballGeom = new THREE.SphereGeometry(0.15, 32, 32);
+  var ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+  var ballMesh = new THREE.Mesh(ballGeom, ballMat);
+  scene.add(ballMesh);
+  var ballBody = new CANNON.Body({ mass: 0.05, linearDamping: 0.1 });
+  ballBody.addShape(new CANNON.Sphere(0.15));
+  ballBody.position.set(0, 2, 5);
+  ballBody.linearDamping = 0.1;
+  ballBody.collisionResponse = true;
+  world.addBody(ballBody);
+
+  var cupMeshes = [];
+  var cupBodies = [];
+  var cupConfigs = [
+    { angle: 0, color: 0xff4444, logo: 'public/logos/placeholder-red.svg' },
+    { angle: (2 * Math.PI) / 3, color: 0x4444ff, logo: 'public/logos/placeholder-blue.svg' },
+    { angle: (4 * Math.PI) / 3, color: 0x44ff44, logo: 'public/logos/placeholder-green.svg' }
+  ];
+
+  var cupGeom = new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32);
+  var texLoader = new THREE.TextureLoader();
+  var base = (document.currentScript && document.currentScript.src) ? document.currentScript.src : window.location.href;
+  base = base.replace(/[^/\\]+$/, '');
+  if (base.length && base[base.length - 1] !== '/' && base[base.length - 1] !== '\\') base += '/';
+
+  function addCup(worldX, worldZ, angle, color, logoPath) {
+    var mat = new THREE.MeshStandardMaterial({ color: color });
+    var mesh = new THREE.Mesh(cupGeom.clone(), mat);
+    mesh.position.set(worldX, 0.2, worldZ);
+    mesh.rotation.y = -angle;
+    scene.add(mesh);
+    cupMeshes.push(mesh);
+
+    var body = new CANNON.Body({ mass: 0 });
+    body.addShape(new CANNON.Cylinder(0.25, 0.15, 0.6, 16));
+    body.position.set(worldX, 0.2, worldZ);
+    body.quaternion.setFromEuler(0, -angle, 0);
+    world.addBody(body);
+    cupBodies.push(body);
+
+    if (logoPath) {
+      var url = base + logoPath;
+      texLoader.load(url, function (tex) {
+        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+        if (tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+        mesh.material.map = tex;
+        mesh.material.color.setHex(0xffffff);
+      });
+    }
+  }
+
+  for (var r = 0; r < cupConfigs.length; r++) {
+    var cfg = cupConfigs[r];
+    for (var row = 0; row < 4; row++) {
+      for (var col = 0; col <= row; col++) {
+        var localX = (col - row / 2) * SPACING;
+        var localZ = row * ROW_OFFSET;
+        var theta = cfg.angle;
+        var worldX = localX * Math.cos(theta) - (localZ + DISTANCE_FROM_CENTER) * Math.sin(theta);
+        var worldZ = localX * Math.sin(theta) + (localZ + DISTANCE_FROM_CENTER) * Math.cos(theta);
+        addCup(worldX, worldZ, cfg.angle, cfg.color, cfg.logo);
+      }
+    }
+  }
+
+  function resetBall() {
+    ballBody.position.set(0, 2, 5);
+    ballBody.velocity.set(0, 0, 0);
+    ballBody.angularVelocity.set(0, 0, 0);
+  }
+
+  var startX = 0, startY = 0, startTime = 0;
+
+  function startLaunch(clientX, clientY) {
+    startX = clientX;
+    startY = clientY;
+    startTime = Date.now();
+  }
+  function endLaunch(clientX, clientY) {
+    var dt = Date.now() - startTime;
+    if (dt < 50) return;
+    var force = 4;
+    var vX = ((clientX - startX) / dt) * force;
+    var vY = (Math.abs(clientY - startY) / dt) * force * 0.5;
+    var vZ = -(Math.abs(clientY - startY) / dt) * force;
+    ballBody.velocity.set(vX, vY, vZ);
+  }
+
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    startLaunch(e.touches[0].clientX, e.touches[0].clientY);
+  });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    endLaunch(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+  });
+
+  canvas.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    startLaunch(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('mouseup', function (e) {
+    e.preventDefault();
+    endLaunch(e.clientX, e.clientY);
+  });
+
+  document.getElementById('reset').addEventListener('click', resetBall);
+
+  window.addEventListener('resize', function () {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  var last = performance.now();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    world.step(dt);
+
+    ballMesh.position.copy(ballBody.position);
+    ballMesh.quaternion.copy(ballBody.quaternion);
+    for (var i = 0; i < cupBodies.length; i++) {
+      cupMeshes[i].position.copy(cupBodies[i].position);
+      cupMeshes[i].quaternion.copy(cupBodies[i].quaternion);
+    }
+
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(loop);
+})();
+  </script>
+</body>
+</html>
