@@ -38,10 +38,13 @@
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  var light = new THREE.PointLight(0xffffff, 1);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+  var light = new THREE.PointLight(0xffffff, 1.5);
   light.position.set(10, 10, 10);
   scene.add(light);
+  var fill = new THREE.DirectionalLight(0xffffff, 0.4);
+  fill.position.set(0, 10, 0);
+  scene.add(fill);
 
   var world = new CANNON.World();
   world.gravity.set(0, -9.8, 0);
@@ -74,9 +77,9 @@
   var cupMeshes = [];
   var cupBodies = [];
   var cupConfigs = [
-    { angle: 0, color: 0xff4444, logo: 'public/logos/placeholder-red.svg' },
-    { angle: (2 * Math.PI) / 3, color: 0x4444ff, logo: 'public/logos/placeholder-blue.svg' },
-    { angle: (4 * Math.PI) / 3, color: 0x44ff44, logo: 'public/logos/placeholder-green.svg' }
+    { angle: 0, color: 0xe63946, logo: null },
+    { angle: (2 * Math.PI) / 3, color: 0x457b9d, logo: null },
+    { angle: (4 * Math.PI) / 3, color: 0x2a9d8f, logo: null }
   ];
 
   var cupGeom = new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32);
