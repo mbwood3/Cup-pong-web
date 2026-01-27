@@ -1,0 +1,19 @@
+TO PLAY CUP PONG (no install needed)
+====================================
+
+EASIEST: Double-click "OPEN IN BROWSER.bat"
+   -> This opens the game in Edge or Chrome.
+
+If that doesn't work, try this:
+   1. Open Edge or Chrome (from Start menu).
+   2. Press Ctrl+O (or menu File -> Open file).
+   3. Go to this folder and choose "game.html".
+   4. Click Open.
+
+How to play:
+   - On phone/tablet: swipe on the screen to throw the ball.
+   - On computer: click and drag, then release.
+   - Click "Reset Ball" to try again.
+
+The cups show placeholder logos (1, 2, 3). To use your own logos,
+replace the image files in the "public/logos" folder.
