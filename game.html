@@ -82,11 +82,10 @@
     { angle: (4 * Math.PI) / 3, color: 0x2a9d8f }
   ];
 
-  var cupGeom = new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32);
-
   function addCup(worldX, worldZ, angle, color) {
-    var mat = new THREE.MeshStandardMaterial({ color: color });
-    var mesh = new THREE.Mesh(cupGeom.clone(), mat);
+    var geom = new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32);
+    var mat = new THREE.MeshBasicMaterial({ color: color });
+    var mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(worldX, 0.2, worldZ);
     mesh.rotation.y = -angle;
     scene.add(mesh);
