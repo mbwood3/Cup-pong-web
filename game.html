@@ -271,13 +271,60 @@
 
     scene.add(mesh);
 
+    // Hollow cup physics: wall segments + bottom disc so the ball can fall in.
+    var CUP_H = 0.6;
+    var WALLS = 10;
+    var WALL_THICK = 0.05;
+    var INNER_R = 0.19;
+    var WALL_R = INNER_R + WALL_THICK * 0.5;
+    var SEG_LEN = (2 * Math.PI * WALL_R) / WALLS * 0.9;
+    var BOT_THICK = 0.06;
+
     var body = new CANNON.Body({ mass: 0 });
-    body.addShape(new CANNON.Cylinder(0.25, 0.15, 0.6, 16));
     body.position.set(x, 0.2, z);
     body.quaternion.setFromEuler(0, -angle, 0);
+
+    // walls
+    for (var wi = 0; wi < WALLS; wi++) {
+      var theta = (wi / WALLS) * Math.PI * 2;
+      var ox = Math.cos(theta) * WALL_R;
+      var oz = Math.sin(theta) * WALL_R;
+      var shape = new CANNON.Box(new CANNON.Vec3(WALL_THICK * 0.5, CUP_H * 0.5, SEG_LEN * 0.5));
+      var q = new CANNON.Quaternion();
+      q.setFromEuler(0, theta + Math.PI / 2, 0);
+      body.addShape(shape, new CANNON.Vec3(ox, 0, oz), q);
+    }
+    // bottom disc (cylinder)
+    body.addShape(
+      new CANNON.Cylinder(INNER_R, INNER_R, BOT_THICK, 16),
+      new CANNON.Vec3(0, -CUP_H * 0.5 + BOT_THICK * 0.5, 0),
+      new CANNON.Quaternion().setFromEuler(Math.PI / 2, 0, 0)
+    );
     world.addBody(body);
 
-    cups.push({ mesh: mesh, body: body, material: material, outline: outline, i: cupIndex });
+    // Goal sensor inside cup (no collision response)
+    var sensor = new CANNON.Body({ mass: 0 });
+    sensor.position.set(x, 0.2, z);
+    sensor.quaternion.setFromEuler(0, -angle, 0);
+    sensor.collisionResponse = false;
+    sensor.addShape(new CANNON.Cylinder(INNER_R * 0.85, INNER_R * 0.85, CUP_H * 0.45, 12));
+    sensor.addEventListener('collide', function (e) {
+      if (e.body !== ballBody) return;
+      // mark + remove this cup
+      for (var ii = 0; ii < cups.length; ii++) {
+        if (cups[ii].sensorBody === sensor && !cups[ii].scored) {
+          cups[ii].scored = true;
+          scene.remove(cups[ii].mesh);
+          world.removeBody(cups[ii].body);
+          world.removeBody(cups[ii].sensorBody);
+          resetBall();
+          break;
+        }
+      }
+    });
+    world.addBody(sensor);
+
+    cups.push({ mesh: mesh, body: body, sensorBody: sensor, material: material, outline: outline, i: cupIndex, scored: false });
   }
 
   // Create 3 racks of cups
@@ -409,6 +456,7 @@
     ballMesh.quaternion.copy(ballBody.quaternion);
 
     for (var i = 0; i < cups.length; i++) {
+      if (cups[i].scored) continue;
       cups[i].mesh.position.copy(cups[i].body.position);
       cups[i].mesh.quaternion.copy(cups[i].body.quaternion);
 

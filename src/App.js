@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { ContactShadows, Edges } from "@react-three/drei";
-import { Physics, useSphere, usePlane, useCylinder } from "@react-three/cannon";
+import { Physics, useSphere, usePlane, useCylinder, useCompoundBody } from "@react-three/cannon";
 import * as THREE from "three";
 
 function makeStarfieldMoonTexture({ width = 1024, height = 512, seed = 1 } = {}) {
@@ -381,6 +381,7 @@ function PingPongBall({ resetTrigger }) {
     args: [0.15],
     restitution: 0.8, // Bounciness
     linearDamping: 0.1, // Air resistance
+    userData: { type: "ball" },
   }));
 
   useEffect(() => {
@@ -441,13 +442,69 @@ function PingPongBall({ resetTrigger }) {
 }
 
 // 3. The Static Cup (with optional logo texture)
-function Cup({ position, rotation, color, logo, seed = 0 }) {
-  const [ref] = useCylinder(() => ({
-    mass: 0, // Static = Immovable (like a wall)
-    position: position,
-    rotation: rotation, // Pass the calculated rotation
-    args: [0.25, 0.15, 0.6, 16],
-  }));
+function Cup({ id, position, rotation, color, logo, seed = 0, onScored }) {
+  // Physics: build a hollow "cup" using wall segments + a bottom.
+  // This lets the ball fall *into* the cup instead of colliding with a solid cylinder.
+  const CUP_HEIGHT = 0.6;
+  const WALLS = 10;
+  const WALL_THICKNESS = 0.05;
+  const INNER_RADIUS = 0.19;
+  const WALL_RADIUS = INNER_RADIUS + WALL_THICKNESS * 0.5;
+  const SEG_LEN = (2 * Math.PI * WALL_RADIUS) / WALLS * 0.9;
+  const BOTTOM_THICKNESS = 0.06;
+
+  const [ref] = useCompoundBody(() => {
+    const shapes = [];
+    // Wall ring (boxes)
+    for (let i = 0; i < WALLS; i++) {
+      const theta = (i / WALLS) * Math.PI * 2;
+      const x = Math.cos(theta) * WALL_RADIUS;
+      const z = Math.sin(theta) * WALL_RADIUS;
+      // Rotate so the long axis is tangent to the circle (theta + 90deg)
+      shapes.push({
+        type: "Box",
+        args: [WALL_THICKNESS * 0.5, CUP_HEIGHT * 0.5, SEG_LEN * 0.5],
+        position: [x, 0, z],
+        rotation: [0, theta + Math.PI / 2, 0],
+      });
+    }
+    // Bottom "disc"
+    shapes.push({
+      type: "Cylinder",
+      args: [INNER_RADIUS, INNER_RADIUS, BOTTOM_THICKNESS, 16],
+      position: [0, -CUP_HEIGHT * 0.5 + BOTTOM_THICKNESS * 0.5, 0],
+      rotation: [Math.PI / 2, 0, 0],
+    });
+
+    return {
+      mass: 0,
+      position,
+      rotation,
+      shapes,
+    };
+  }, undefined, [position[0], position[1], position[2], rotation[0], rotation[1], rotation[2]]);
+
+  // Goal sensor: an invisible trigger volume inside the cup.
+  // When the ball touches this, we count it as "in the cup" and remove the cup.
+  const scoredRef = useRef(false);
+  useCylinder(
+    () => ({
+      mass: 0,
+      type: "Static",
+      collisionResponse: false,
+      position,
+      rotation,
+      args: [INNER_RADIUS * 0.85, INNER_RADIUS * 0.85, CUP_HEIGHT * 0.45, 12],
+      onCollide: (e) => {
+        if (scoredRef.current) return;
+        if (!e?.body?.userData || e.body.userData.type !== "ball") return;
+        scoredRef.current = true;
+        onScored?.(id);
+      },
+    }),
+    undefined,
+    [id, onScored, position[0], position[1], position[2], rotation[0], rotation[1], rotation[2]]
+  );
 
   const [texture, setTexture] = useState(null);
   const outlineColor = useMemo(() => {
@@ -497,55 +554,56 @@ function Cup({ position, rotation, color, logo, seed = 0 }) {
   );
 }
 
-// 4. The Rack (Now with World Coordinate Math)
-function CupRack({ angle, color, logo, seedOffset = 0 }) {
-  const cups = [];
-  let k = 0;
-  
-  // Settings
-  const DISTANCE_FROM_CENTER = 2.0; // How far the rack is from the middle
-  const SPACING = 0.52; // Distance between cups
-  
-  // Math Helpers
-  const ROW_OFFSET = SPACING * Math.sqrt(3) / 2;
+function makeInitialCups() {
+  const racks = [
+    { angle: 0, color: "#ff4444", logo: `${process.env.PUBLIC_URL || ""}/logos/placeholder-red.svg`, seedOffset: 0 },
+    { angle: (2 * Math.PI) / 3, color: "#4444ff", logo: `${process.env.PUBLIC_URL || ""}/logos/placeholder-blue.svg`, seedOffset: 100 },
+    { angle: (4 * Math.PI) / 3, color: "#44ff44", logo: `${process.env.PUBLIC_URL || ""}/logos/placeholder-green.svg`, seedOffset: 200 },
+  ];
 
-  // We loop through the rows/cols just like before
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col <= row; col++) {
-      
-      // 1. Calculate "Local" Position (as if rack was at 0,0,0 facing North)
-      // We center the triangle so the "tip" is closest to the middle
-      const localX = (col - row / 2) * SPACING;
-      const localZ = row * ROW_OFFSET; // Positive Z goes "back" into the triangle
+  const DISTANCE_FROM_CENTER = 2.0;
+  const SPACING = 0.52;
+  const ROW_OFFSET = (SPACING * Math.sqrt(3)) / 2;
 
-      // 2. Rotate this position around the world center
-      // We add Math.PI to 'angle' so the racks face INWARDS to the center
-      const theta = angle; 
-      
-      // Rotate local (x, z) by theta
-      // We also push it out by DISTANCE_FROM_CENTER
-      const worldX = (localX * Math.cos(theta)) - ((localZ + DISTANCE_FROM_CENTER) * Math.sin(theta));
-      const worldZ = (localX * Math.sin(theta)) + ((localZ + DISTANCE_FROM_CENTER) * Math.cos(theta));
-      
-      const seed = seedOffset + k;
-      cups.push(
-        <Cup 
-          key={k++} 
-          position={[worldX, 0.2, worldZ]} 
-          rotation={[0, -angle, 0]} // Rotate the cup to match the rack
-          color={color}
-          logo={logo}
-          seed={seed}
-        />
-      );
+  const out = [];
+  let id = 0;
+  for (const rack of racks) {
+    const angle = rack.angle;
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col <= row; col++) {
+        const localX = (col - row / 2) * SPACING;
+        const localZ = row * ROW_OFFSET;
+
+        const worldX = localX * Math.cos(angle) - (localZ + DISTANCE_FROM_CENTER) * Math.sin(angle);
+        const worldZ = localX * Math.sin(angle) + (localZ + DISTANCE_FROM_CENTER) * Math.cos(angle);
+
+        out.push({
+          id: id++,
+          position: [worldX, 0.2, worldZ],
+          rotation: [0, -angle, 0],
+          color: rack.color,
+          logo: rack.logo,
+          seed: rack.seedOffset + id,
+        });
+      }
     }
   }
-  return <>{cups}</>; // Return cups directly, no <group> wrapper needed
+  return out;
 }
 
 // 5. The Main App
 export default function App() {
   const [resetCount, setResetCount] = useState(0);
+  const initialCups = useMemo(() => makeInitialCups(), []);
+  const [cups, setCups] = useState(() => initialCups);
+
+  const handleCupScored = useMemo(() => {
+    return (cupId) => {
+      setCups((prev) => prev.filter((c) => c.id !== cupId));
+      // reset the ball after a make
+      setResetCount((n) => n + 1);
+    };
+  }, []);
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: "#222", touchAction: "none" }}>
@@ -578,14 +636,9 @@ export default function App() {
           <Floor />
           <PingPongBall resetTrigger={resetCount} />
           
-          {/* Racks are now placed by angle (in radians).
-             0 = Facing South
-             2*PI/3 = 120 degrees
-             4*PI/3 = 240 degrees
-          */}
-          <CupRack angle={0} color="#ff4444" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-red.svg`} seedOffset={0} />
-          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-blue.svg`} seedOffset={100} />
-          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-green.svg`} seedOffset={200} /> 
+          {cups.map((c) => (
+            <Cup key={c.id} {...c} onScored={handleCupScored} />
+          ))}
 
         </Physics>
 
