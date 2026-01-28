@@ -4,85 +4,106 @@ import { ContactShadows, Edges } from "@react-three/drei";
 import { Physics, useSphere, usePlane, useCylinder, useCompoundBody } from "@react-three/cannon";
 import * as THREE from "three";
 
-function makeStarfieldMoonTexture({ width = 1024, height = 512, seed = 1 } = {}) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
+function PsyMoonSky() {
+  const mat = useMemo(() => {
+    const m = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec3 vDir;
+        uniform float uTime;
 
-  const rand = (() => {
-    // deterministic-ish LCG
-    let s = (seed >>> 0) || 1;
-    return () => (s = (1664525 * s + 1013904223) >>> 0) / 4294967296;
-  })();
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
 
-  // Space gradient
-  const g = ctx.createLinearGradient(0, 0, 0, height);
-  g.addColorStop(0, "#040017");
-  g.addColorStop(0.5, "#090032");
-  g.addColorStop(1, "#12001a");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, width, height);
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          float a = hash(i);
+          float b = hash(i + vec2(1.0, 0.0));
+          float c = hash(i + vec2(0.0, 1.0));
+          float d = hash(i + vec2(1.0, 1.0));
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+        }
 
-  // Nebula blobs
-  for (let i = 0; i < 18; i++) {
-    const x = rand() * width;
-    const y = rand() * height;
-    const r = (0.08 + rand() * 0.25) * Math.min(width, height);
-    const hue = (rand() * 360) | 0;
-    const neb = ctx.createRadialGradient(x, y, r * 0.05, x, y, r);
-    neb.addColorStop(0, `hsla(${hue}, 95%, 65%, 0.22)`);
-    neb.addColorStop(1, `hsla(${hue}, 95%, 45%, 0)`);
-    ctx.fillStyle = neb;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+        float fbm(vec2 p) {
+          float v = 0.0;
+          float a = 0.5;
+          for (int i = 0; i < 5; i++) {
+            v += a * noise(p);
+            p = p * 2.03 + vec2(17.0, 9.0);
+            a *= 0.5;
+          }
+          return v;
+        }
 
-  // Stars
-  for (let i = 0; i < 2200; i++) {
-    const x = rand() * width;
-    const y = rand() * height;
-    const s = rand() < 0.985 ? 1 : 2;
-    const a = 0.25 + rand() * 0.7;
-    ctx.fillStyle = `rgba(255,255,255,${a})`;
-    ctx.fillRect(x, y, s, s);
-  }
+        void main() {
+          // Spherical UV from direction
+          float u = atan(vDir.z, vDir.x) / (6.28318530718) + 0.5;
+          float v = asin(clamp(vDir.y, -1.0, 1.0)) / 3.14159265359 + 0.5;
+          vec2 uv = vec2(u, v);
 
-  // Big “crazy moon” disk baked into sky texture (for distant vibe)
-  const moonX = width * 0.78;
-  const moonY = height * 0.28;
-  const moonR = height * 0.22;
-  const moon = ctx.createRadialGradient(moonX, moonY, moonR * 0.05, moonX, moonY, moonR);
-  moon.addColorStop(0, "rgba(250,250,255,0.95)");
-  moon.addColorStop(0.55, "rgba(220,230,255,0.8)");
-  moon.addColorStop(1, "rgba(160,170,210,0)");
-  ctx.fillStyle = moon;
-  ctx.beginPath();
-  ctx.arc(moonX, moonY, moonR * 1.25, 0, Math.PI * 2);
-  ctx.fill();
+          // Base space gradient
+          vec3 top = vec3(0.02, 0.00, 0.09);
+          vec3 bot = vec3(0.07, 0.00, 0.10);
+          vec3 col = mix(bot, top, smoothstep(0.0, 1.0, uv.y));
 
-  // Crater hints on baked moon
-  ctx.globalCompositeOperation = "multiply";
-  for (let i = 0; i < 60; i++) {
-    const cx = moonX + (rand() * 2 - 1) * moonR * 0.7;
-    const cy = moonY + (rand() * 2 - 1) * moonR * 0.7;
-    const r = (0.02 + rand() * 0.12) * moonR;
-    const crater = ctx.createRadialGradient(cx, cy, r * 0.15, cx, cy, r);
-    crater.addColorStop(0, "rgba(140,140,170,0.95)");
-    crater.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = crater;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalCompositeOperation = "source-over";
+          // Psychedelic nebula flow
+          float t = uTime * 0.05;
+          vec2 p = uv * 3.5;
+          p += vec2(sin(t + uv.y * 2.0), cos(t * 1.3 + uv.x * 2.0)) * 0.35;
+          float n = fbm(p + vec2(t * 2.0, -t * 1.6));
+          float n2 = fbm(p * 1.7 - vec2(t * 1.2, t * 1.9));
+          vec3 nebA = vec3(0.85, 0.15, 1.00);
+          vec3 nebB = vec3(0.10, 0.90, 1.00);
+          vec3 nebC = vec3(1.00, 0.65, 0.15);
+          col += mix(nebA, nebB, n) * (0.25 * smoothstep(0.25, 0.85, n2));
+          col += nebC * (0.12 * smoothstep(0.55, 0.95, n));
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.needsUpdate = true;
-  return tex;
+          // Stars (crisp + twinkly)
+          vec2 suv = uv * vec2(1400.0, 700.0);
+          vec2 cell = floor(suv);
+          vec2 f = fract(suv);
+          float h = hash(cell);
+          float star = smoothstep(0.9975, 1.0, h) * (1.0 - length(f - 0.5) * 1.6);
+          float tw = 0.65 + 0.35 * sin(uTime * 2.7 + h * 19.0);
+          col += vec3(1.0) * star * tw;
+
+          // Subtle vignette
+          float vig = smoothstep(0.95, 0.2, length(uv - 0.5));
+          col *= (0.85 + 0.15 * vig);
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+      side: THREE.BackSide,
+      depthWrite: false,
+      depthTest: false,
+    });
+    return m;
+  }, []);
+
+  useFrame(({ clock }) => {
+    mat.uniforms.uTime.value = clock.getElapsedTime();
+  });
+
+  return (
+    <mesh scale={[-1, 1, 1]} frustumCulled={false} renderOrder={-1000}>
+      <sphereGeometry args={[60, 48, 48]} />
+      <primitive object={mat} attach="material" />
+    </mesh>
+  );
 }
 
 function makeCraterMapTexture({ size = 512, seed = 2 } = {}) {
@@ -131,9 +152,9 @@ function makeCraterMapTexture({ size = 512, seed = 2 } = {}) {
 }
 
 function CrazyMoonBackdrop() {
-  const skyTex = useMemo(() => makeStarfieldMoonTexture({ seed: 7 }), []);
-  const craterTex = useMemo(() => makeCraterMapTexture({ seed: 11 }), []);
+  const craterTex = useMemo(() => makeCraterMapTexture({ size: 1024, seed: 11 }), []);
   const moonRef = useRef();
+  const haloRef = useRef();
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
@@ -141,27 +162,39 @@ function CrazyMoonBackdrop() {
       moonRef.current.rotation.y = t * 0.06;
       moonRef.current.rotation.z = t * 0.02;
     }
+    if (haloRef.current) {
+      haloRef.current.material.opacity = 0.22 + 0.08 * Math.sin(t * 1.1);
+    }
   });
 
   return (
     <>
-      {/* Skydome */}
-      <mesh scale={[-1, 1, 1]}>
-        <sphereGeometry args={[45, 48, 48]} />
-        <meshBasicMaterial map={skyTex} side={THREE.BackSide} />
-      </mesh>
+      <PsyMoonSky />
 
       {/* Big “crazy moon” object */}
-      <mesh ref={moonRef} position={[10, 11, -18]} castShadow={false} receiveShadow={false}>
+      <mesh ref={moonRef} position={[10, 11, -22]} castShadow={false} receiveShadow={false}>
         <sphereGeometry args={[4.2, 64, 64]} />
         <meshStandardMaterial
           color="#d8ddff"
           emissive="#6b4dff"
-          emissiveIntensity={0.22}
+          emissiveIntensity={0.28}
           roughness={0.85}
           metalness={0.05}
           bumpMap={craterTex}
           bumpScale={0.55}
+        />
+      </mesh>
+
+      {/* Moon halo glow */}
+      <mesh ref={haloRef} position={[10, 11, -22]} castShadow={false} receiveShadow={false} renderOrder={-10}>
+        <sphereGeometry args={[5.2, 48, 48]} />
+        <meshBasicMaterial
+          color="#9a7bff"
+          transparent
+          opacity={0.24}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          side={THREE.FrontSide}
         />
       </mesh>
     </>
@@ -202,10 +235,18 @@ function MoonDragon() {
 
   const curve = useMemo(() => {
     const pts = [];
-    const r = 16;
+    // Keep the dragon in front of the camera (in the sky, near the moon).
+    const center = new THREE.Vector3(0, 10.5, -12);
+    const r = 9.5;
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * r, 6.5 + Math.sin(a * 2) * 1.2, Math.sin(a) * r));
+      pts.push(
+        new THREE.Vector3(
+          center.x + Math.cos(a) * r,
+          center.y + Math.sin(a * 2) * 1.4,
+          center.z + Math.sin(a) * r
+        )
+      );
     }
     return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
   }, []);
@@ -248,7 +289,8 @@ function MoonDragon() {
   });
 
   return (
-    <group ref={group} position={[0, 6, 0]}>
+    <group ref={group} position={[0, 10, -12]} scale={2.4} frustumCulled={false}>
+      <pointLight color="#c06bff" intensity={1.15} distance={18} decay={2} position={[0, 0.6, 0.8]} />
       {/* Body */}
       <mesh geometry={tubeGeom} material={bodyMat} castShadow />
       {/* Head */}

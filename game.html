@@ -52,75 +52,61 @@
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
 
-  function makeStarfieldMoonTexture(width, height, seed) {
-    var c = document.createElement('canvas');
-    c.width = width; c.height = height;
-    var ctx = c.getContext('2d');
-    var s = (seed >>> 0) || 1;
-    function rand() { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }
-
-    var g = ctx.createLinearGradient(0, 0, 0, height);
-    g.addColorStop(0, '#040017');
-    g.addColorStop(0.5, '#090032');
-    g.addColorStop(1, '#12001a');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
-
-    for (var i = 0; i < 18; i++) {
-      var x = rand() * width;
-      var y = rand() * height;
-      var r = (0.08 + rand() * 0.25) * Math.min(width, height);
-      var hue = (rand() * 360) | 0;
-      var neb = ctx.createRadialGradient(x, y, r * 0.05, x, y, r);
-      neb.addColorStop(0, 'hsla(' + hue + ',95%,65%,0.22)');
-      neb.addColorStop(1, 'hsla(' + hue + ',95%,45%,0)');
-      ctx.fillStyle = neb;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    for (var j = 0; j < 2200; j++) {
-      var sx = rand() * width;
-      var sy = rand() * height;
-      var ss = rand() < 0.985 ? 1 : 2;
-      var a = 0.25 + rand() * 0.7;
-      ctx.fillStyle = 'rgba(255,255,255,' + a + ')';
-      ctx.fillRect(sx, sy, ss, ss);
-    }
-
-    var moonX = width * 0.78;
-    var moonY = height * 0.28;
-    var moonR = height * 0.22;
-    var moon = ctx.createRadialGradient(moonX, moonY, moonR * 0.05, moonX, moonY, moonR);
-    moon.addColorStop(0, 'rgba(250,250,255,0.95)');
-    moon.addColorStop(0.55, 'rgba(220,230,255,0.8)');
-    moon.addColorStop(1, 'rgba(160,170,210,0)');
-    ctx.fillStyle = moon;
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, moonR * 1.25, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.globalCompositeOperation = 'multiply';
-    for (var k = 0; k < 60; k++) {
-      var cx = moonX + (rand() * 2 - 1) * moonR * 0.7;
-      var cy = moonY + (rand() * 2 - 1) * moonR * 0.7;
-      var cr = (0.02 + rand() * 0.12) * moonR;
-      var crater = ctx.createRadialGradient(cx, cy, cr * 0.15, cx, cy, cr);
-      crater.addColorStop(0, 'rgba(140,140,170,0.95)');
-      crater.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = crater;
-      ctx.beginPath();
-      ctx.arc(cx, cy, cr, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalCompositeOperation = 'source-over';
-
-    var tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.needsUpdate = true;
-    return tex;
+  // Shader sky (crisp on iPhone)
+  function makeSkyMaterial() {
+    var mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader:
+        'varying vec3 vDir;\\n' +
+        'void main(){\\n' +
+        '  vDir = normalize(position);\\n' +
+        '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);\\n' +
+        '}\\n',
+      fragmentShader:
+        'precision highp float;\\n' +
+        'varying vec3 vDir;\\n' +
+        'uniform float uTime;\\n' +
+        'float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123); }\\n' +
+        'float noise(vec2 p){\\n' +
+        '  vec2 i=floor(p), f=fract(p);\\n' +
+        '  float a=hash(i), b=hash(i+vec2(1.0,0.0)), c=hash(i+vec2(0.0,1.0)), d=hash(i+vec2(1.0,1.0));\\n' +
+        '  vec2 u=f*f*(3.0-2.0*f);\\n' +
+        '  return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;\\n' +
+        '}\\n' +
+        'float fbm(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p=p*2.03+vec2(17.0,9.0); a*=0.5; } return v; }\\n' +
+        'void main(){\\n' +
+        '  float u = atan(vDir.z, vDir.x) / 6.28318530718 + 0.5;\\n' +
+        '  float v = asin(clamp(vDir.y,-1.0,1.0)) / 3.14159265359 + 0.5;\\n' +
+        '  vec2 uv = vec2(u,v);\\n' +
+        '  vec3 top = vec3(0.02,0.00,0.09);\\n' +
+        '  vec3 bot = vec3(0.07,0.00,0.10);\\n' +
+        '  vec3 col = mix(bot, top, smoothstep(0.0,1.0,uv.y));\\n' +
+        '  float t = uTime * 0.05;\\n' +
+        '  vec2 p = uv * 3.5;\\n' +
+        '  p += vec2(sin(t+uv.y*2.0), cos(t*1.3+uv.x*2.0)) * 0.35;\\n' +
+        '  float n = fbm(p + vec2(t*2.0,-t*1.6));\\n' +
+        '  float n2 = fbm(p*1.7 - vec2(t*1.2,t*1.9));\\n' +
+        '  vec3 nebA = vec3(0.85,0.15,1.00);\\n' +
+        '  vec3 nebB = vec3(0.10,0.90,1.00);\\n' +
+        '  vec3 nebC = vec3(1.00,0.65,0.15);\\n' +
+        '  col += mix(nebA, nebB, n) * (0.25 * smoothstep(0.25,0.85,n2));\\n' +
+        '  col += nebC * (0.12 * smoothstep(0.55,0.95,n));\\n' +
+        '  vec2 suv = uv * vec2(1400.0,700.0);\\n' +
+        '  vec2 cell = floor(suv);\\n' +
+        '  vec2 f = fract(suv);\\n' +
+        '  float h = hash(cell);\\n' +
+        '  float star = smoothstep(0.9975,1.0,h) * (1.0 - length(f-0.5)*1.6);\\n' +
+        '  float tw = 0.65 + 0.35 * sin(uTime*2.7 + h*19.0);\\n' +
+        '  col += vec3(1.0) * star * tw;\\n' +
+        '  float vig = smoothstep(0.95,0.2,length(uv-0.5));\\n' +
+        '  col *= (0.85 + 0.15*vig);\\n' +
+        '  gl_FragColor = vec4(col,1.0);\\n' +
+        '}\\n',
+      side: THREE.BackSide,
+      depthWrite: false,
+      depthTest: false
+    });
+    return mat;
   }
 
   function makeCraterMapTexture(size, seed) {
@@ -163,30 +149,35 @@
   }
 
   // Skydome + big moon object
-  var skyTex = makeStarfieldMoonTexture(1024, 512, 7);
-  var skydome = new THREE.Mesh(
-    new THREE.SphereGeometry(45, 48, 48),
-    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide })
-  );
-  // Use negative scale to keep inside correct if needed
+  var skyMat = makeSkyMaterial();
+  var skydome = new THREE.Mesh(new THREE.SphereGeometry(60, 48, 48), skyMat);
   skydome.scale.set(-1, 1, 1);
+  skydome.renderOrder = -1000;
   scene.add(skydome);
 
-  var craterTex = makeCraterMapTexture(512, 11);
+  var craterTex = makeCraterMapTexture(1024, 11);
   var bigMoon = new THREE.Mesh(
     new THREE.SphereGeometry(4.2, 64, 64),
     new THREE.MeshStandardMaterial({
       color: 0xd8ddff,
       emissive: 0x6b4dff,
-      emissiveIntensity: 0.22,
+      emissiveIntensity: 0.28,
       roughness: 0.85,
       metalness: 0.05,
       bumpMap: craterTex,
       bumpScale: 0.55
     })
   );
-  bigMoon.position.set(10, 11, -18);
+  bigMoon.position.set(10, 11, -22);
   scene.add(bigMoon);
+
+  var moonHalo = new THREE.Mesh(
+    new THREE.SphereGeometry(5.2, 48, 48),
+    new THREE.MeshBasicMaterial({ color: 0x9a7bff, transparent: true, opacity: 0.24, depthWrite: false, blending: THREE.AdditiveBlending })
+  );
+  moonHalo.position.copy(bigMoon.position);
+  moonHalo.renderOrder = -10;
+  scene.add(moonHalo);
 
   // Lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.28));
@@ -347,6 +338,7 @@
   // Moon Dragon (procedural): glowing tube body + flapping wings
   function makeDragon() {
     var group = new THREE.Group();
+    group.frustumCulled = false;
 
     var bodyMat = new THREE.MeshStandardMaterial({
       color: 0xb9a6ff,
@@ -368,10 +360,11 @@
     });
 
     var pts = [];
-    var r = 16;
+    var center = new THREE.Vector3(0, 10.5, -12);
+    var r = 9.5;
     for (var i = 0; i < 10; i++) {
       var a = (i / 10) * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * r, 6.5 + Math.sin(a * 2) * 1.2, Math.sin(a) * r));
+      pts.push(new THREE.Vector3(center.x + Math.cos(a) * r, center.y + Math.sin(a * 2) * 1.4, center.z + Math.sin(a) * r));
     }
     var curve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
     var tubeGeom = new THREE.TubeGeometry(curve, 160, 0.16, 10, true);
@@ -401,11 +394,18 @@
     wingR.castShadow = true;
     wings.add(wingR);
 
+    // Make it very visible
+    group.scale.set(2.4, 2.4, 2.4);
+    group.position.set(0, 10, -12);
+
     return { group: group, curve: curve, bodyMat: bodyMat, wingL: wingL, wingR: wingR };
   }
 
   var dragon = makeDragon();
   scene.add(dragon.group);
+  var dragonLight = new THREE.PointLight(0xc06bff, 1.15, 18, 2);
+  dragonLight.position.set(0, 0.6, 0.8);
+  dragon.group.add(dragonLight);
 
   function resetBall() {
     ballBody.position.set(0, 2, 5);
@@ -474,8 +474,10 @@
 
     // Animate moon + dragon
     var t = now * 0.001;
+    skyMat.uniforms.uTime.value = t;
     bigMoon.rotation.y = t * 0.06;
     bigMoon.rotation.z = t * 0.02;
+    moonHalo.material.opacity = 0.22 + 0.08 * Math.sin(t * 1.1);
 
     var u = (t * 0.03) % 1;
     var p = dragon.curve.getPointAt(u);
