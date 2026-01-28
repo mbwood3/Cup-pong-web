@@ -77,18 +77,14 @@
   var cupMeshes = [];
   var cupBodies = [];
   var cupConfigs = [
-    { angle: 0, color: 0xe63946, logo: null },
-    { angle: (2 * Math.PI) / 3, color: 0x457b9d, logo: null },
-    { angle: (4 * Math.PI) / 3, color: 0x2a9d8f, logo: null }
+    { angle: 0, color: 0xe63946 },
+    { angle: (2 * Math.PI) / 3, color: 0x457b9d },
+    { angle: (4 * Math.PI) / 3, color: 0x2a9d8f }
   ];
 
   var cupGeom = new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32);
-  var texLoader = new THREE.TextureLoader();
-  var base = (document.currentScript && document.currentScript.src) ? document.currentScript.src : window.location.href;
-  base = base.replace(/[^/\\]+$/, '');
-  if (base.length && base[base.length - 1] !== '/' && base[base.length - 1] !== '\\') base += '/';
 
-  function addCup(worldX, worldZ, angle, color, logoPath) {
+  function addCup(worldX, worldZ, angle, color) {
     var mat = new THREE.MeshStandardMaterial({ color: color });
     var mesh = new THREE.Mesh(cupGeom.clone(), mat);
     mesh.position.set(worldX, 0.2, worldZ);
@@ -102,15 +98,6 @@
     body.quaternion.setFromEuler(0, -angle, 0);
     world.addBody(body);
     cupBodies.push(body);
-
-    if (logoPath) {
-      var url = base + logoPath;
-      texLoader.load(url, function (tex) {
-        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-        if (tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
-        mesh.material.map = tex;
-      });
-    }
   }
 
   for (var r = 0; r < cupConfigs.length; r++) {
@@ -122,7 +109,7 @@
         var theta = cfg.angle;
         var worldX = localX * Math.cos(theta) - (localZ + DISTANCE_FROM_CENTER) * Math.sin(theta);
         var worldZ = localX * Math.sin(theta) + (localZ + DISTANCE_FROM_CENTER) * Math.cos(theta);
-        addCup(worldX, worldZ, cfg.angle, cfg.color, cfg.logo);
+        addCup(worldX, worldZ, cfg.angle, cfg.color);
       }
     }
   }
