@@ -6,13 +6,13 @@
   <title>Cup Pong</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; width: 100%; background: #222; touch-action: none; overflow: hidden; }
+    html, body { height: 100%; width: 100%; background: #1a1a2e; touch-action: none; overflow: hidden; }
     #game { display: block; width: 100%; height: 100%; }
     #reset {
       position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
       padding: 15px 30px; font-size: 20px; background: white; border: none;
       border-radius: 50px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-      cursor: pointer; font-weight: bold; pointer-events: auto;
+      cursor: pointer; font-weight: bold;
     }
   </style>
 </head>
@@ -26,10 +26,19 @@
 (function () {
   'use strict';
 
-  var DISTANCE_FROM_CENTER = 2.0, SPACING = 0.52, ROW_OFFSET = SPACING * Math.sqrt(3) / 2;
+  // Cup rack colors - bright and bold
+  var RACK_COLORS = [
+    0xff3366,  // Hot pink / red
+    0x33ccff,  // Cyan / bright blue  
+    0x66ff66   // Lime green
+  ];
+
+  var DISTANCE = 2.0, SPACING = 0.52, ROW_OFFSET = SPACING * Math.sqrt(3) / 2;
 
   var canvas = document.getElementById('game');
   var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1a2e);
+
   var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
   camera.position.set(0, 8, 12);
   camera.lookAt(0, 0, 0);
@@ -38,77 +47,88 @@
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-  var light = new THREE.PointLight(0xffffff, 1.5);
-  light.position.set(10, 10, 10);
-  scene.add(light);
-  var fill = new THREE.DirectionalLight(0xffffff, 0.4);
-  fill.position.set(0, 10, 0);
-  scene.add(fill);
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  var sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  sun.position.set(5, 10, 5);
+  scene.add(sun);
 
+  // Physics
   var world = new CANNON.World();
   world.gravity.set(0, -9.8, 0);
   world.broadphase = new CANNON.NaiveBroadphase();
   world.solver.iterations = 20;
 
-  var floorGeom = new THREE.CircleGeometry(10, 64);
-  var floorMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-  var floorMesh = new THREE.Mesh(floorGeom, floorMat);
+  // Floor
+  var floorMesh = new THREE.Mesh(
+    new THREE.CircleGeometry(10, 64),
+    new THREE.MeshStandardMaterial({ color: 0x2d2d44 })
+  );
   floorMesh.rotation.x = -Math.PI / 2;
   floorMesh.position.y = -0.1;
   scene.add(floorMesh);
+
   var floorBody = new CANNON.Body({ mass: 0 });
   floorBody.addShape(new CANNON.Plane());
   floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   floorBody.position.set(0, -0.1, 0);
   world.addBody(floorBody);
 
-  var ballGeom = new THREE.SphereGeometry(0.15, 32, 32);
-  var ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-  var ballMesh = new THREE.Mesh(ballGeom, ballMat);
+  // Ball
+  var ballMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 32, 32),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x333333 })
+  );
   scene.add(ballMesh);
-  var ballBody = new CANNON.Body({ mass: 0.05, linearDamping: 0.1 });
+
+  var ballBody = new CANNON.Body({ mass: 0.05 });
   ballBody.addShape(new CANNON.Sphere(0.15));
   ballBody.position.set(0, 2, 5);
   ballBody.linearDamping = 0.1;
-  ballBody.collisionResponse = true;
   world.addBody(ballBody);
 
-  var cupMeshes = [];
-  var cupBodies = [];
-  var cupConfigs = [
-    { angle: 0, color: 0xe63946 },
-    { angle: (2 * Math.PI) / 3, color: 0x457b9d },
-    { angle: (4 * Math.PI) / 3, color: 0x2a9d8f }
-  ];
+  // Cups - store meshes and bodies
+  var cups = [];
 
-  function addCup(worldX, worldZ, angle, color) {
-    var geom = new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32);
-    var mat = new THREE.MeshBasicMaterial({ color: color });
-    var mesh = new THREE.Mesh(geom, mat);
-    mesh.position.set(worldX, 0.2, worldZ);
+  function createCup(x, z, angle, color) {
+    // Create a unique material for each cup
+    var material = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.3,
+      metalness: 0.1,
+      roughness: 0.8
+    });
+
+    var mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.25, 0.15, 0.6, 32),
+      material
+    );
+    mesh.position.set(x, 0.2, z);
     mesh.rotation.y = -angle;
     scene.add(mesh);
-    cupMeshes.push(mesh);
 
     var body = new CANNON.Body({ mass: 0 });
     body.addShape(new CANNON.Cylinder(0.25, 0.15, 0.6, 16));
-    body.position.set(worldX, 0.2, worldZ);
+    body.position.set(x, 0.2, z);
     body.quaternion.setFromEuler(0, -angle, 0);
     world.addBody(body);
-    cupBodies.push(body);
+
+    cups.push({ mesh: mesh, body: body });
   }
 
-  for (var r = 0; r < cupConfigs.length; r++) {
-    var cfg = cupConfigs[r];
+  // Create 3 racks of cups
+  for (var r = 0; r < 3; r++) {
+    var angle = r * (2 * Math.PI / 3);
+    var color = RACK_COLORS[r];
+
     for (var row = 0; row < 4; row++) {
       for (var col = 0; col <= row; col++) {
-        var localX = (col - row / 2) * SPACING;
-        var localZ = row * ROW_OFFSET;
-        var theta = cfg.angle;
-        var worldX = localX * Math.cos(theta) - (localZ + DISTANCE_FROM_CENTER) * Math.sin(theta);
-        var worldZ = localX * Math.sin(theta) + (localZ + DISTANCE_FROM_CENTER) * Math.cos(theta);
-        addCup(worldX, worldZ, cfg.angle, cfg.color);
+        var lx = (col - row / 2) * SPACING;
+        var lz = row * ROW_OFFSET;
+        var wx = lx * Math.cos(angle) - (lz + DISTANCE) * Math.sin(angle);
+        var wz = lx * Math.sin(angle) + (lz + DISTANCE) * Math.cos(angle);
+        createCup(wx, wz, angle, color);
       }
     }
   }
@@ -119,66 +139,56 @@
     ballBody.angularVelocity.set(0, 0, 0);
   }
 
+  // Input handling
   var startX = 0, startY = 0, startTime = 0;
 
-  function startLaunch(clientX, clientY) {
-    startX = clientX;
-    startY = clientY;
-    startTime = Date.now();
+  function onStart(x, y) {
+    startX = x; startY = y; startTime = Date.now();
   }
-  function endLaunch(clientX, clientY) {
+
+  function onEnd(x, y) {
     var dt = Date.now() - startTime;
     if (dt < 50) return;
-    var force = 4;
-    var vX = ((clientX - startX) / dt) * force;
-    var vY = (Math.abs(clientY - startY) / dt) * force * 0.5;
-    var vZ = -(Math.abs(clientY - startY) / dt) * force;
-    ballBody.velocity.set(vX, vY, vZ);
+    var f = 4;
+    ballBody.velocity.set(
+      ((x - startX) / dt) * f,
+      (Math.abs(y - startY) / dt) * f * 0.5,
+      -(Math.abs(y - startY) / dt) * f
+    );
   }
 
-  canvas.addEventListener('touchstart', function (e) {
-    e.preventDefault();
-    startLaunch(e.touches[0].clientX, e.touches[0].clientY);
-  });
-  canvas.addEventListener('touchend', function (e) {
-    e.preventDefault();
-    endLaunch(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-  });
-
-  canvas.addEventListener('mousedown', function (e) {
-    e.preventDefault();
-    startLaunch(e.clientX, e.clientY);
-  });
-  canvas.addEventListener('mouseup', function (e) {
-    e.preventDefault();
-    endLaunch(e.clientX, e.clientY);
-  });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); onStart(e.touches[0].clientX, e.touches[0].clientY); });
+  canvas.addEventListener('touchend', function(e) { e.preventDefault(); onEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY); });
+  canvas.addEventListener('mousedown', function(e) { e.preventDefault(); onStart(e.clientX, e.clientY); });
+  canvas.addEventListener('mouseup', function(e) { e.preventDefault(); onEnd(e.clientX, e.clientY); });
 
   document.getElementById('reset').addEventListener('click', resetBall);
 
-  window.addEventListener('resize', function () {
+  window.addEventListener('resize', function() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // Animation loop
   var last = performance.now();
-  function loop(now) {
-    requestAnimationFrame(loop);
+  function animate(now) {
+    requestAnimationFrame(animate);
     var dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     world.step(dt);
 
     ballMesh.position.copy(ballBody.position);
     ballMesh.quaternion.copy(ballBody.quaternion);
-    for (var i = 0; i < cupBodies.length; i++) {
-      cupMeshes[i].position.copy(cupBodies[i].position);
-      cupMeshes[i].quaternion.copy(cupBodies[i].quaternion);
+
+    for (var i = 0; i < cups.length; i++) {
+      cups[i].mesh.position.copy(cups[i].body.position);
+      cups[i].mesh.quaternion.copy(cups[i].body.quaternion);
     }
 
     renderer.render(scene, camera);
   }
-  requestAnimationFrame(loop);
+  animate(performance.now());
 })();
   </script>
 </body>

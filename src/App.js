@@ -97,24 +97,29 @@ function Cup({ position, rotation, color, logo }) {
 
   useEffect(() => {
     if (!logo) return;
-    let tex = null;
     let cancelled = false;
     const loader = new THREE.TextureLoader();
     loader.load(
       logo,
       (t) => {
-        if (cancelled) { t.dispose(); return; }
-        tex = t;
-        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-        tex.colorSpace = THREE.SRGBColorSpace;
-        setTexture(tex);
+        if (cancelled) {
+          t.dispose();
+          return;
+        }
+        t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+        t.colorSpace = THREE.SRGBColorSpace;
+        setTexture(t);
       },
       undefined,
-      () => { if (!cancelled) setTexture(null); }
+      () => {
+        if (!cancelled) setTexture(null);
+      }
     );
     return () => {
       cancelled = true;
-      if (tex) tex.dispose();
+      // Do not dispose the applied texture here; the material may still
+      // reference it. Only in-flight textures are disposed (in load callback
+      // when cancelled).
     };
   }, [logo]);
 
@@ -192,9 +197,9 @@ export default function App() {
              2*PI/3 = 120 degrees
              4*PI/3 = 240 degrees
           */}
-          <CupRack angle={0} color="#ff4444" logo="/logos/placeholder-red.svg" /> 
-          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" logo="/logos/placeholder-blue.svg" /> 
-          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" logo="/logos/placeholder-green.svg" /> 
+          <CupRack angle={0} color="#ff4444" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-red.svg`} />
+          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-blue.svg`} />
+          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-green.svg`} /> 
 
         </Physics>
       </Canvas>
