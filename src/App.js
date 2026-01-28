@@ -127,7 +127,11 @@ function Cup({ position, rotation, color, logo }) {
     <mesh ref={ref}>
       <cylinderGeometry args={[0.25, 0.15, 0.6, 32]} />
       <meshStandardMaterial
-        color={texture ? "#ffffff" : color}
+        // Keep the cup's base color even after the logo texture loads.
+        // Otherwise the async texture load "flips" cups to pure white.
+        color={color}
+        emissive={color}
+        emissiveIntensity={0.25}
         map={texture || undefined}
       />
     </mesh>
