@@ -52,6 +52,142 @@
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
 
+  function makeStarfieldMoonTexture(width, height, seed) {
+    var c = document.createElement('canvas');
+    c.width = width; c.height = height;
+    var ctx = c.getContext('2d');
+    var s = (seed >>> 0) || 1;
+    function rand() { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }
+
+    var g = ctx.createLinearGradient(0, 0, 0, height);
+    g.addColorStop(0, '#040017');
+    g.addColorStop(0.5, '#090032');
+    g.addColorStop(1, '#12001a');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, width, height);
+
+    for (var i = 0; i < 18; i++) {
+      var x = rand() * width;
+      var y = rand() * height;
+      var r = (0.08 + rand() * 0.25) * Math.min(width, height);
+      var hue = (rand() * 360) | 0;
+      var neb = ctx.createRadialGradient(x, y, r * 0.05, x, y, r);
+      neb.addColorStop(0, 'hsla(' + hue + ',95%,65%,0.22)');
+      neb.addColorStop(1, 'hsla(' + hue + ',95%,45%,0)');
+      ctx.fillStyle = neb;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (var j = 0; j < 2200; j++) {
+      var sx = rand() * width;
+      var sy = rand() * height;
+      var ss = rand() < 0.985 ? 1 : 2;
+      var a = 0.25 + rand() * 0.7;
+      ctx.fillStyle = 'rgba(255,255,255,' + a + ')';
+      ctx.fillRect(sx, sy, ss, ss);
+    }
+
+    var moonX = width * 0.78;
+    var moonY = height * 0.28;
+    var moonR = height * 0.22;
+    var moon = ctx.createRadialGradient(moonX, moonY, moonR * 0.05, moonX, moonY, moonR);
+    moon.addColorStop(0, 'rgba(250,250,255,0.95)');
+    moon.addColorStop(0.55, 'rgba(220,230,255,0.8)');
+    moon.addColorStop(1, 'rgba(160,170,210,0)');
+    ctx.fillStyle = moon;
+    ctx.beginPath();
+    ctx.arc(moonX, moonY, moonR * 1.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'multiply';
+    for (var k = 0; k < 60; k++) {
+      var cx = moonX + (rand() * 2 - 1) * moonR * 0.7;
+      var cy = moonY + (rand() * 2 - 1) * moonR * 0.7;
+      var cr = (0.02 + rand() * 0.12) * moonR;
+      var crater = ctx.createRadialGradient(cx, cy, cr * 0.15, cx, cy, cr);
+      crater.addColorStop(0, 'rgba(140,140,170,0.95)');
+      crater.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = crater;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    var tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  function makeCraterMapTexture(size, seed) {
+    var c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    var ctx = c.getContext('2d');
+    var s = (seed >>> 0) || 1;
+    function rand() { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }
+
+    ctx.fillStyle = 'rgb(128,128,128)';
+    ctx.fillRect(0, 0, size, size);
+
+    for (var i = 0; i < 14000; i++) {
+      var x = (rand() * size) | 0;
+      var y = (rand() * size) | 0;
+      var v = 118 + ((rand() * 40) | 0);
+      ctx.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
+      ctx.fillRect(x, y, 1, 1);
+    }
+
+    for (var j = 0; j < 220; j++) {
+      var cx = rand() * size;
+      var cy = rand() * size;
+      var r = (0.02 + rand() * 0.12) * size;
+      var grad = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
+      grad.addColorStop(0, 'rgb(90,90,90)');
+      grad.addColorStop(0.55, 'rgb(150,150,150)');
+      grad.addColorStop(1, 'rgb(128,128,128)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    var tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  // Skydome + big moon object
+  var skyTex = makeStarfieldMoonTexture(1024, 512, 7);
+  var skydome = new THREE.Mesh(
+    new THREE.SphereGeometry(45, 48, 48),
+    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide })
+  );
+  // Use negative scale to keep inside correct if needed
+  skydome.scale.set(-1, 1, 1);
+  scene.add(skydome);
+
+  var craterTex = makeCraterMapTexture(512, 11);
+  var bigMoon = new THREE.Mesh(
+    new THREE.SphereGeometry(4.2, 64, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0xd8ddff,
+      emissive: 0x6b4dff,
+      emissiveIntensity: 0.22,
+      roughness: 0.85,
+      metalness: 0.05,
+      bumpMap: craterTex,
+      bumpScale: 0.55
+    })
+  );
+  bigMoon.position.set(10, 11, -18);
+  scene.add(bigMoon);
+
   // Lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.28));
   var sun = new THREE.DirectionalLight(0xffffff, 1.25);
@@ -135,13 +271,60 @@
 
     scene.add(mesh);
 
+    // Hollow cup physics: wall segments + bottom disc so the ball can fall in.
+    var CUP_H = 0.6;
+    var WALLS = 10;
+    var WALL_THICK = 0.05;
+    var INNER_R = 0.19;
+    var WALL_R = INNER_R + WALL_THICK * 0.5;
+    var SEG_LEN = (2 * Math.PI * WALL_R) / WALLS * 0.9;
+    var BOT_THICK = 0.06;
+
     var body = new CANNON.Body({ mass: 0 });
-    body.addShape(new CANNON.Cylinder(0.25, 0.15, 0.6, 16));
     body.position.set(x, 0.2, z);
     body.quaternion.setFromEuler(0, -angle, 0);
+
+    // walls
+    for (var wi = 0; wi < WALLS; wi++) {
+      var theta = (wi / WALLS) * Math.PI * 2;
+      var ox = Math.cos(theta) * WALL_R;
+      var oz = Math.sin(theta) * WALL_R;
+      var shape = new CANNON.Box(new CANNON.Vec3(WALL_THICK * 0.5, CUP_H * 0.5, SEG_LEN * 0.5));
+      var q = new CANNON.Quaternion();
+      q.setFromEuler(0, theta + Math.PI / 2, 0);
+      body.addShape(shape, new CANNON.Vec3(ox, 0, oz), q);
+    }
+    // bottom disc (cylinder)
+    body.addShape(
+      new CANNON.Cylinder(INNER_R, INNER_R, BOT_THICK, 16),
+      new CANNON.Vec3(0, -CUP_H * 0.5 + BOT_THICK * 0.5, 0),
+      new CANNON.Quaternion().setFromEuler(Math.PI / 2, 0, 0)
+    );
     world.addBody(body);
 
-    cups.push({ mesh: mesh, body: body, material: material, outline: outline, i: cupIndex });
+    // Goal sensor inside cup (no collision response)
+    var sensor = new CANNON.Body({ mass: 0 });
+    sensor.position.set(x, 0.2, z);
+    sensor.quaternion.setFromEuler(0, -angle, 0);
+    sensor.collisionResponse = false;
+    sensor.addShape(new CANNON.Cylinder(INNER_R * 0.85, INNER_R * 0.85, CUP_H * 0.45, 12));
+    sensor.addEventListener('collide', function (e) {
+      if (e.body !== ballBody) return;
+      // mark + remove this cup
+      for (var ii = 0; ii < cups.length; ii++) {
+        if (cups[ii].sensorBody === sensor && !cups[ii].scored) {
+          cups[ii].scored = true;
+          scene.remove(cups[ii].mesh);
+          world.removeBody(cups[ii].body);
+          world.removeBody(cups[ii].sensorBody);
+          resetBall();
+          break;
+        }
+      }
+    });
+    world.addBody(sensor);
+
+    cups.push({ mesh: mesh, body: body, sensorBody: sensor, material: material, outline: outline, i: cupIndex, scored: false });
   }
 
   // Create 3 racks of cups
@@ -160,6 +343,69 @@
       }
     }
   }
+
+  // Moon Dragon (procedural): glowing tube body + flapping wings
+  function makeDragon() {
+    var group = new THREE.Group();
+
+    var bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xb9a6ff,
+      emissive: 0x7b2cff,
+      emissiveIntensity: 0.65,
+      roughness: 0.35,
+      metalness: 0.15
+    });
+
+    var wingMat = new THREE.MeshStandardMaterial({
+      color: 0x201028,
+      emissive: 0xff4dff,
+      emissiveIntensity: 0.55,
+      roughness: 0.75,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85
+    });
+
+    var pts = [];
+    var r = 16;
+    for (var i = 0; i < 10; i++) {
+      var a = (i / 10) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * r, 6.5 + Math.sin(a * 2) * 1.2, Math.sin(a) * r));
+    }
+    var curve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
+    var tubeGeom = new THREE.TubeGeometry(curve, 160, 0.16, 10, true);
+    var body = new THREE.Mesh(tubeGeom, bodyMat);
+    body.castShadow = true;
+    group.add(body);
+
+    var head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 16, 16),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xa400ff, emissiveIntensity: 1.1, roughness: 0.2, metalness: 0.1 })
+    );
+    head.position.set(0, 0, 0.35);
+    head.castShadow = true;
+    group.add(head);
+
+    var wings = new THREE.Group();
+    wings.position.set(0, 0, -0.1);
+    group.add(wings);
+
+    var wingL = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.65, 1, 1), wingMat);
+    wingL.position.set(0.35, 0.05, 0);
+    wingL.castShadow = true;
+    wings.add(wingL);
+
+    var wingR = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.65, 1, 1), wingMat);
+    wingR.position.set(-0.35, 0.05, 0);
+    wingR.castShadow = true;
+    wings.add(wingR);
+
+    return { group: group, curve: curve, bodyMat: bodyMat, wingL: wingL, wingR: wingR };
+  }
+
+  var dragon = makeDragon();
+  scene.add(dragon.group);
 
   function resetBall() {
     ballBody.position.set(0, 2, 5);
@@ -210,6 +456,7 @@
     ballMesh.quaternion.copy(ballBody.quaternion);
 
     for (var i = 0; i < cups.length; i++) {
+      if (cups[i].scored) continue;
       cups[i].mesh.position.copy(cups[i].body.position);
       cups[i].mesh.quaternion.copy(cups[i].body.quaternion);
 
@@ -224,6 +471,29 @@
       // Complementary neon outline
       cups[i].outline.material.color.setHSL((hue + 0.5) % 1, 1.0, 0.7);
     }
+
+    // Animate moon + dragon
+    var t = now * 0.001;
+    bigMoon.rotation.y = t * 0.06;
+    bigMoon.rotation.z = t * 0.02;
+
+    var u = (t * 0.03) % 1;
+    var p = dragon.curve.getPointAt(u);
+    var p2 = dragon.curve.getPointAt((u + 0.01) % 1);
+    dragon.group.position.copy(p);
+    dragon.group.lookAt(p2);
+    dragon.group.rotation.z += 0.25 * Math.sin(t * 0.9);
+
+    var flap = Math.sin(t * 5.2) * 0.55 + Math.sin(t * 2.1) * 0.15;
+    dragon.wingL.rotation.z = 0.25 + flap;
+    dragon.wingL.rotation.y = 0.55;
+    dragon.wingR.rotation.z = -0.25 - flap;
+    dragon.wingR.rotation.y = -0.55;
+
+    var dh = (t * 0.06) % 1;
+    dragon.bodyMat.color.setHSL(dh, 0.9, 0.6);
+    dragon.bodyMat.emissive.setHSL((dh + 0.55) % 1, 1.0, 0.45);
+    dragon.bodyMat.emissiveIntensity = 0.55 + 0.25 * Math.sin(t * 1.7);
 
     renderer.render(scene, camera);
   }
