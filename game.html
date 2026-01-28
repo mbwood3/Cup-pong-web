@@ -198,8 +198,17 @@
   // Physics
   var world = new CANNON.World();
   world.gravity.set(0, -9.8, 0);
-  world.broadphase = new CANNON.NaiveBroadphase();
-  world.solver.iterations = 20;
+  world.broadphase = new CANNON.SAPBroadphase(world);
+  world.solver.iterations = 30;
+
+  // Materials + contact tuning (GamePigeon-ish)
+  var matBall = new CANNON.Material('ball');
+  var matFloor = new CANNON.Material('floor');
+  var matCup = new CANNON.Material('cup');
+  world.defaultContactMaterial.friction = 0.25;
+  world.defaultContactMaterial.restitution = 0.25;
+  world.addContactMaterial(new CANNON.ContactMaterial(matBall, matFloor, { friction: 0.28, restitution: 0.32 }));
+  world.addContactMaterial(new CANNON.ContactMaterial(matBall, matCup, { friction: 0.22, restitution: 0.42 }));
 
   // Floor
   var floorMesh = new THREE.Mesh(
@@ -212,6 +221,7 @@
   scene.add(floorMesh);
 
   var floorBody = new CANNON.Body({ mass: 0 });
+  floorBody.material = matFloor;
   floorBody.addShape(new CANNON.Plane());
   floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   floorBody.position.set(0, -0.1, 0);
@@ -225,10 +235,12 @@
   ballMesh.castShadow = true;
   scene.add(ballMesh);
 
-  var ballBody = new CANNON.Body({ mass: 0.05 });
+  var ballBody = new CANNON.Body({ mass: 0.04 });
+  ballBody.material = matBall;
   ballBody.addShape(new CANNON.Sphere(0.15));
   ballBody.position.set(0, 2, 5);
-  ballBody.linearDamping = 0.1;
+  ballBody.linearDamping = 0.14;
+  ballBody.angularDamping = 0.38;
   world.addBody(ballBody);
 
   // Cups - store meshes and bodies
@@ -272,6 +284,7 @@
     var BOT_THICK = 0.06;
 
     var body = new CANNON.Body({ mass: 0 });
+    body.material = matCup;
     body.position.set(x, 0.2, z);
     body.quaternion.setFromEuler(0, -angle, 0);
 
@@ -298,12 +311,20 @@
     sensor.position.set(x, 0.2, z);
     sensor.quaternion.setFromEuler(0, -angle, 0);
     sensor.collisionResponse = false;
-    sensor.addShape(new CANNON.Cylinder(INNER_R * 0.85, INNER_R * 0.85, CUP_H * 0.45, 12));
+    // Smaller + lower than full cup volume to avoid false positives on rim hits.
+    sensor.addShape(new CANNON.Cylinder(INNER_R * 0.62, INNER_R * 0.62, CUP_H * 0.28, 12));
     sensor.addEventListener('collide', function (e) {
       if (e.body !== ballBody) return;
       // mark + remove this cup
       for (var ii = 0; ii < cups.length; ii++) {
         if (cups[ii].sensorBody === sensor && !cups[ii].scored) {
+          // extra sanity checks to reduce rim false-positives
+          var dx = ballBody.position.x - cups[ii].body.position.x;
+          var dz = ballBody.position.z - cups[ii].body.position.z;
+          var inside = (dx * dx + dz * dz) < (INNER_R * 0.62) * (INNER_R * 0.62);
+          var lowEnough = ballBody.position.y < cups[ii].body.position.y + 0.06;
+          if (!inside || !lowEnough) return;
+
           cups[ii].scored = true;
           scene.remove(cups[ii].mesh);
           world.removeBody(cups[ii].body);
@@ -423,12 +444,17 @@
   function onEnd(x, y) {
     var dt = Date.now() - startTime;
     if (dt < 50) return;
-    var f = 4;
-    ballBody.velocity.set(
-      ((x - startX) / dt) * f,
-      (Math.abs(y - startY) / dt) * f * 0.5,
-      -(Math.abs(y - startY) / dt) * f
-    );
+    var dx = x - startX;
+    var dy = y - startY;
+    var swipeY = Math.max(0, -dy);
+    var power = Math.min(1, swipeY / 420);
+
+    var vZ = -(3.2 + power * 7.8);
+    var vY = 1.05 + power * 5.2;
+    var vX = Math.max(-3.0, Math.min(3.0, (dx / dt) * 2.6));
+
+    ballBody.velocity.set(vX, vY, vZ);
+    ballBody.angularVelocity.set(0, vX * 2.2, 0);
   }
 
   canvas.addEventListener('touchstart', function(e) { e.preventDefault(); onStart(e.touches[0].clientX, e.touches[0].clientY); });
