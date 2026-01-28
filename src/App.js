@@ -1,8 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { ContactShadows, Edges } from "@react-three/drei";
-import { Physics, useSphere, usePlane, useCylinder, useCompoundBody } from "@react-three/cannon";
+import { Physics, useContactMaterial, useSphere, usePlane, useCylinder, useCompoundBody } from "@react-three/cannon";
 import * as THREE from "three";
+
+function PhysicsTuning() {
+  // "GamePigeon-ish" tuning: less bouncy on floor, snappier rim interactions.
+  useContactMaterial(
+    { name: "ball" },
+    { name: "floor" },
+    { friction: 0.28, restitution: 0.32 },
+    []
+  );
+  useContactMaterial(
+    { name: "ball" },
+    { name: "cup" },
+    { friction: 0.22, restitution: 0.42 },
+    []
+  );
+  return null;
+}
 
 function PsyMoonSky() {
   const mat = useMemo(() => {
@@ -405,7 +422,8 @@ function PsychedelicCupMaterial({ baseColor, seed, map }) {
 function Floor() {
   const [ref] = usePlane(() => ({ 
     rotation: [-Math.PI / 2, 0, 0], 
-    position: [0, -0.1, 0] 
+    position: [0, -0.1, 0],
+    material: { name: "floor" },
   }));
   return (
     <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]} receiveShadow>
@@ -418,11 +436,12 @@ function Floor() {
 // 2. The Smart Ball
 function PingPongBall({ resetTrigger }) {
   const [ref, api] = useSphere(() => ({
-    mass: 0.05, // Standard ping pong ball is 2.7g, but 0.05 feels right in Sim
+    mass: 0.04, // Slightly lighter for a more GamePigeon-ish feel
     position: [0, 2, 6],
     args: [0.15],
-    restitution: 0.8, // Bounciness
-    linearDamping: 0.1, // Air resistance
+    material: { name: "ball" },
+    linearDamping: 0.14, // Air resistance
+    angularDamping: 0.38,
     userData: { type: "ball" },
   }));
 
@@ -450,20 +469,24 @@ function PingPongBall({ resetTrigger }) {
       const endTime = Date.now();
 
       const deltaX = endX - startX;
-      const deltaY = endY - startY; 
+      const deltaY = endY - startY;
       const timeDiff = endTime - startTime;
       
       // Safety check for accidental taps
       if (timeDiff < 50) return;
 
-      const forceFactor = 4; 
-      
-      // Calculate velocity based on swipe speed
-      const vX = (deltaX / timeDiff) * forceFactor;
-      const vY = (Math.abs(deltaY) / timeDiff) * forceFactor * 0.5; 
-      const vZ = - (Math.abs(deltaY) / timeDiff) * forceFactor;
+      // GamePigeon-ish throw curve: mostly forward with a controllable arc.
+      const swipeY = Math.max(0, -deltaY); // only upward swipes throw
+      const swipeX = deltaX;
+      const power = Math.min(1, swipeY / 420); // normalize
+
+      const vZ = -(3.2 + power * 7.8);
+      const vY = 1.05 + power * 5.2;
+      const vX = THREE.MathUtils.clamp((swipeX / timeDiff) * 2.6, -3.0, 3.0);
 
       api.velocity.set(vX, vY, vZ);
+      // Add a bit of "english" (spin) for feel
+      api.angularVelocity.set(0, vX * 2.2, 0);
     };
 
     window.addEventListener("touchstart", handleTouchStart);
@@ -522,6 +545,7 @@ function Cup({ id, position, rotation, color, logo, seed = 0, onScored }) {
       mass: 0,
       position,
       rotation,
+      material: { name: "cup" },
       shapes,
     };
   }, undefined, [position[0], position[1], position[2], rotation[0], rotation[1], rotation[2]]);
@@ -533,13 +557,22 @@ function Cup({ id, position, rotation, color, logo, seed = 0, onScored }) {
     () => ({
       mass: 0,
       type: "Static",
-      collisionResponse: false,
+      isTrigger: true,
       position,
       rotation,
-      args: [INNER_RADIUS * 0.85, INNER_RADIUS * 0.85, CUP_HEIGHT * 0.45, 12],
+      // Smaller + lower than full cup volume to avoid false positives on rim hits.
+      args: [INNER_RADIUS * 0.62, INNER_RADIUS * 0.62, CUP_HEIGHT * 0.28, 12],
       onCollide: (e) => {
         if (scoredRef.current) return;
         if (!e?.body?.userData || e.body.userData.type !== "ball") return;
+
+        const p = e.body.position;
+        const dx = p.x - position[0];
+        const dz = p.z - position[2];
+        const inside = dx * dx + dz * dz < (INNER_RADIUS * 0.62) * (INNER_RADIUS * 0.62);
+        const lowEnough = p.y < position[1] + 0.06;
+        if (!inside || !lowEnough) return;
+
         scoredRef.current = true;
         onScored?.(id);
       },
@@ -674,7 +707,19 @@ export default function App() {
         />
         <pointLight position={[-6, 8, -6]} intensity={0.35} />
         
-        <Physics gravity={[0, -9.8, 0]} iterations={20}>
+        <Physics
+          gravity={[0, -9.8, 0]}
+          broadphase="SAP"
+          iterations={30}
+          allowSleep
+          defaultContactMaterial={{
+            contactEquationStiffness: 1e8,
+            contactEquationRelaxation: 3,
+            frictionEquationStiffness: 1e8,
+            frictionEquationRelaxation: 3,
+          }}
+        >
+          <PhysicsTuning />
           <Floor />
           <PingPongBall resetTrigger={resetCount} />
           
