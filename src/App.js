@@ -4,6 +4,279 @@ import { ContactShadows, Edges } from "@react-three/drei";
 import { Physics, useSphere, usePlane, useCylinder } from "@react-three/cannon";
 import * as THREE from "three";
 
+function makeStarfieldMoonTexture({ width = 1024, height = 512, seed = 1 } = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  const rand = (() => {
+    // deterministic-ish LCG
+    let s = (seed >>> 0) || 1;
+    return () => (s = (1664525 * s + 1013904223) >>> 0) / 4294967296;
+  })();
+
+  // Space gradient
+  const g = ctx.createLinearGradient(0, 0, 0, height);
+  g.addColorStop(0, "#040017");
+  g.addColorStop(0.5, "#090032");
+  g.addColorStop(1, "#12001a");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, width, height);
+
+  // Nebula blobs
+  for (let i = 0; i < 18; i++) {
+    const x = rand() * width;
+    const y = rand() * height;
+    const r = (0.08 + rand() * 0.25) * Math.min(width, height);
+    const hue = (rand() * 360) | 0;
+    const neb = ctx.createRadialGradient(x, y, r * 0.05, x, y, r);
+    neb.addColorStop(0, `hsla(${hue}, 95%, 65%, 0.22)`);
+    neb.addColorStop(1, `hsla(${hue}, 95%, 45%, 0)`);
+    ctx.fillStyle = neb;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Stars
+  for (let i = 0; i < 2200; i++) {
+    const x = rand() * width;
+    const y = rand() * height;
+    const s = rand() < 0.985 ? 1 : 2;
+    const a = 0.25 + rand() * 0.7;
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.fillRect(x, y, s, s);
+  }
+
+  // Big “crazy moon” disk baked into sky texture (for distant vibe)
+  const moonX = width * 0.78;
+  const moonY = height * 0.28;
+  const moonR = height * 0.22;
+  const moon = ctx.createRadialGradient(moonX, moonY, moonR * 0.05, moonX, moonY, moonR);
+  moon.addColorStop(0, "rgba(250,250,255,0.95)");
+  moon.addColorStop(0.55, "rgba(220,230,255,0.8)");
+  moon.addColorStop(1, "rgba(160,170,210,0)");
+  ctx.fillStyle = moon;
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, moonR * 1.25, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Crater hints on baked moon
+  ctx.globalCompositeOperation = "multiply";
+  for (let i = 0; i < 60; i++) {
+    const cx = moonX + (rand() * 2 - 1) * moonR * 0.7;
+    const cy = moonY + (rand() * 2 - 1) * moonR * 0.7;
+    const r = (0.02 + rand() * 0.12) * moonR;
+    const crater = ctx.createRadialGradient(cx, cy, r * 0.15, cx, cy, r);
+    crater.addColorStop(0, "rgba(140,140,170,0.95)");
+    crater.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = crater;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function makeCraterMapTexture({ size = 512, seed = 2 } = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  const rand = (() => {
+    let s = (seed >>> 0) || 1;
+    return () => (s = (1664525 * s + 1013904223) >>> 0) / 4294967296;
+  })();
+
+  ctx.fillStyle = "rgb(128,128,128)";
+  ctx.fillRect(0, 0, size, size);
+
+  // soft noise
+  for (let i = 0; i < 14000; i++) {
+    const x = (rand() * size) | 0;
+    const y = (rand() * size) | 0;
+    const v = 118 + ((rand() * 40) | 0);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  // craters
+  for (let i = 0; i < 220; i++) {
+    const cx = rand() * size;
+    const cy = rand() * size;
+    const r = (0.02 + rand() * 0.12) * size;
+    const grad = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
+    grad.addColorStop(0, "rgb(90,90,90)");
+    grad.addColorStop(0.55, "rgb(150,150,150)");
+    grad.addColorStop(1, "rgb(128,128,128)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function CrazyMoonBackdrop() {
+  const skyTex = useMemo(() => makeStarfieldMoonTexture({ seed: 7 }), []);
+  const craterTex = useMemo(() => makeCraterMapTexture({ seed: 11 }), []);
+  const moonRef = useRef();
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (moonRef.current) {
+      moonRef.current.rotation.y = t * 0.06;
+      moonRef.current.rotation.z = t * 0.02;
+    }
+  });
+
+  return (
+    <>
+      {/* Skydome */}
+      <mesh scale={[-1, 1, 1]}>
+        <sphereGeometry args={[45, 48, 48]} />
+        <meshBasicMaterial map={skyTex} side={THREE.BackSide} />
+      </mesh>
+
+      {/* Big “crazy moon” object */}
+      <mesh ref={moonRef} position={[10, 11, -18]} castShadow={false} receiveShadow={false}>
+        <sphereGeometry args={[4.2, 64, 64]} />
+        <meshStandardMaterial
+          color="#d8ddff"
+          emissive="#6b4dff"
+          emissiveIntensity={0.22}
+          roughness={0.85}
+          metalness={0.05}
+          bumpMap={craterTex}
+          bumpScale={0.55}
+        />
+      </mesh>
+    </>
+  );
+}
+
+function MoonDragon() {
+  const group = useRef();
+  const wingL = useRef();
+  const wingR = useRef();
+
+  const bodyMat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#b9a6ff"),
+      emissive: new THREE.Color("#7b2cff"),
+      emissiveIntensity: 0.65,
+      roughness: 0.35,
+      metalness: 0.15,
+      toneMapped: false,
+    });
+    return m;
+  }, []);
+
+  const wingMat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#201028"),
+      emissive: new THREE.Color("#ff4dff"),
+      emissiveIntensity: 0.55,
+      roughness: 0.75,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+      toneMapped: false,
+    });
+    return m;
+  }, []);
+
+  const curve = useMemo(() => {
+    const pts = [];
+    const r = 16;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * r, 6.5 + Math.sin(a * 2) * 1.2, Math.sin(a) * r));
+    }
+    return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
+  }, []);
+
+  const tubeGeom = useMemo(() => {
+    return new THREE.TubeGeometry(curve, 160, 0.16, 10, true);
+  }, [curve]);
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    const g = group.current;
+    if (!g) return;
+
+    // Move along curve
+    const u = (t * 0.03) % 1;
+    const p = curve.getPointAt(u);
+    const p2 = curve.getPointAt((u + 0.01) % 1);
+    g.position.copy(p);
+    g.lookAt(p2);
+
+    // Subtle banking
+    g.rotation.z += 0.25 * Math.sin(t * 0.9);
+
+    // Wing flap
+    const flap = Math.sin(t * 5.2) * 0.55 + Math.sin(t * 2.1) * 0.15;
+    if (wingL.current) {
+      wingL.current.rotation.z = 0.25 + flap;
+      wingL.current.rotation.y = 0.55;
+    }
+    if (wingR.current) {
+      wingR.current.rotation.z = -0.25 - flap;
+      wingR.current.rotation.y = -0.55;
+    }
+
+    // Color shifting glow
+    const hue = (t * 0.06) % 1;
+    bodyMat.color.setHSL(hue, 0.9, 0.6);
+    bodyMat.emissive.setHSL((hue + 0.55) % 1, 1, 0.45);
+    bodyMat.emissiveIntensity = 0.55 + 0.25 * Math.sin(t * 1.7);
+  });
+
+  return (
+    <group ref={group} position={[0, 6, 0]}>
+      {/* Body */}
+      <mesh geometry={tubeGeom} material={bodyMat} castShadow />
+      {/* Head */}
+      <mesh position={[0, 0, 0.35]} castShadow>
+        <sphereGeometry args={[0.22, 16, 16]} />
+        <meshStandardMaterial
+          color="#ffffff"
+          emissive="#a400ff"
+          emissiveIntensity={1.1}
+          roughness={0.2}
+          metalness={0.1}
+          toneMapped={false}
+        />
+      </mesh>
+
+      {/* Wings */}
+      <group position={[0, 0, -0.1]}>
+        <mesh ref={wingL} position={[0.35, 0.05, 0]} material={wingMat} castShadow>
+          <planeGeometry args={[1.4, 0.65, 1, 1]} />
+        </mesh>
+        <mesh ref={wingR} position={[-0.35, 0.05, 0]} material={wingMat} castShadow>
+          <planeGeometry args={[1.4, 0.65, 1, 1]} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
 function PsychedelicCupMaterial({ baseColor, seed, map }) {
   const materialRef = useRef();
   const shaderRef = useRef(null);
@@ -282,6 +555,8 @@ export default function App() {
         gl={{ antialias: true }}
         dpr={[1, 2]}
       >
+        <CrazyMoonBackdrop />
+        <MoonDragon />
         <ambientLight intensity={0.22} />
         <directionalLight
           position={[6, 12, 6]}
