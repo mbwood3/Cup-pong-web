@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { ContactShadows, Edges } from "@react-three/drei";
 import { Physics, useContactMaterial, useSphere, usePlane, useCylinder, useCompoundBody } from "@react-three/cannon";
@@ -480,9 +480,9 @@ function PingPongBall({ resetTrigger }) {
       const swipeX = deltaX;
       const power = Math.min(1, swipeY / 420); // normalize
 
-      const vZ = -(3.2 + power * 7.8);
-      const vY = 1.05 + power * 5.2;
-      const vX = THREE.MathUtils.clamp((swipeX / timeDiff) * 2.6, -3.0, 3.0);
+      const vZ = -(2.4 + power * 5.6);
+      const vY = 1.55 + power * 6.9;
+      const vX = THREE.MathUtils.clamp((swipeX / timeDiff) * 1.8, -2.2, 2.2);
 
       api.velocity.set(vX, vY, vZ);
       // Add a bit of "english" (spin) for feel
@@ -514,9 +514,14 @@ function Cup({ id, position, rotation, color, logo, seed = 0, onScored }) {
   const WALLS = 10;
   const WALL_THICKNESS = 0.05;
   const INNER_RADIUS = 0.19;
+  const SENSOR_RADIUS = INNER_RADIUS * 0.62;
+  const SENSOR_HEIGHT = CUP_HEIGHT * 0.28;
   const WALL_RADIUS = INNER_RADIUS + WALL_THICKNESS * 0.5;
   const SEG_LEN = (2 * Math.PI * WALL_RADIUS) / WALLS * 0.9;
   const BOTTOM_THICKNESS = 0.06;
+  const [cupX, cupY, cupZ] = position;
+  const [rotX, rotY, rotZ] = rotation;
+  const sensorPosition = useMemo(() => [cupX, cupY - CUP_HEIGHT * 0.22, cupZ], [cupX, cupY, cupZ]);
 
   const [ref] = useCompoundBody(() => {
     const shapes = [];
@@ -548,37 +553,46 @@ function Cup({ id, position, rotation, color, logo, seed = 0, onScored }) {
       material: { name: "cup" },
       shapes,
     };
-  }, undefined, [position[0], position[1], position[2], rotation[0], rotation[1], rotation[2]]);
+  }, undefined, [cupX, cupY, cupZ, rotX, rotY, rotZ]);
 
   // Goal sensor: an invisible trigger volume inside the cup.
   // When the ball touches this, we count it as "in the cup" and remove the cup.
   const scoredRef = useRef(false);
-  useCylinder(
+  const handleTrigger = useCallback(
+    (e) => {
+      if (scoredRef.current) return;
+      const body = e?.body;
+      if (!body) return;
+      const isBall = body.userData?.type === "ball" || body.material?.name === "ball";
+      if (!isBall) return;
+
+      const p = body.position;
+      const dx = p.x - cupX;
+      const dz = p.z - cupZ;
+      const inside = dx * dx + dz * dz < SENSOR_RADIUS * SENSOR_RADIUS;
+      const lowEnough = p.y < cupY + CUP_HEIGHT * 0.15;
+      if (!inside || !lowEnough) return;
+
+      scoredRef.current = true;
+      onScored?.(id);
+    },
+    [CUP_HEIGHT, SENSOR_RADIUS, cupX, cupY, cupZ, id, onScored]
+  );
+
+  const [sensorRef] = useCylinder(
     () => ({
       mass: 0,
       type: "Static",
       isTrigger: true,
-      position,
+      collisionResponse: false,
+      position: sensorPosition,
       rotation,
       // Smaller + lower than full cup volume to avoid false positives on rim hits.
-      args: [INNER_RADIUS * 0.62, INNER_RADIUS * 0.62, CUP_HEIGHT * 0.28, 12],
-      onCollide: (e) => {
-        if (scoredRef.current) return;
-        if (!e?.body?.userData || e.body.userData.type !== "ball") return;
-
-        const p = e.body.position;
-        const dx = p.x - position[0];
-        const dz = p.z - position[2];
-        const inside = dx * dx + dz * dz < (INNER_RADIUS * 0.62) * (INNER_RADIUS * 0.62);
-        const lowEnough = p.y < position[1] + 0.06;
-        if (!inside || !lowEnough) return;
-
-        scoredRef.current = true;
-        onScored?.(id);
-      },
+      args: [SENSOR_RADIUS, SENSOR_RADIUS, SENSOR_HEIGHT, 12],
+      onCollideBegin: handleTrigger,
     }),
     undefined,
-    [id, onScored, position[0], position[1], position[2], rotation[0], rotation[1], rotation[2]]
+    [sensorPosition[0], sensorPosition[1], sensorPosition[2], rotX, rotY, rotZ, handleTrigger]
   );
 
   const [texture, setTexture] = useState(null);
@@ -619,13 +633,19 @@ function Cup({ id, position, rotation, color, logo, seed = 0, onScored }) {
   }, [logo]);
 
   return (
-    <mesh ref={ref} castShadow receiveShadow>
-      <cylinderGeometry args={[0.25, 0.15, 0.6, 32]} />
-      <PsychedelicCupMaterial baseColor={color} seed={seed} map={texture} />
-      {/* Outline + neon rim for cup differentiation */}
-      <Edges scale={1.01} threshold={15} color="#050505" />
-      <Edges scale={1.045} threshold={15} color={outlineColor} />
-    </mesh>
+    <group>
+      <mesh ref={ref} castShadow receiveShadow>
+        <cylinderGeometry args={[0.25, 0.15, 0.6, 32]} />
+        <PsychedelicCupMaterial baseColor={color} seed={seed} map={texture} />
+        {/* Outline + neon rim for cup differentiation */}
+        <Edges scale={1.01} threshold={15} color="#050505" />
+        <Edges scale={1.045} threshold={15} color={outlineColor} />
+      </mesh>
+      <mesh ref={sensorRef} position={sensorPosition} rotation={rotation} visible={false}>
+        <cylinderGeometry args={[SENSOR_RADIUS, SENSOR_RADIUS, SENSOR_HEIGHT, 12]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+    </group>
   );
 }
 
