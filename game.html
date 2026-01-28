@@ -46,11 +46,26 @@
   var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
 
   // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-  var sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.28));
+  var sun = new THREE.DirectionalLight(0xffffff, 1.25);
   sun.position.set(5, 10, 5);
+  sun.castShadow = true;
+  sun.shadow.mapSize.width = 2048;
+  sun.shadow.mapSize.height = 2048;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 30;
+  sun.shadow.camera.left = -10;
+  sun.shadow.camera.right = 10;
+  sun.shadow.camera.top = 10;
+  sun.shadow.camera.bottom = -10;
+  sun.shadow.bias = -0.0002;
   scene.add(sun);
 
   // Physics
@@ -66,6 +81,7 @@
   );
   floorMesh.rotation.x = -Math.PI / 2;
   floorMesh.position.y = -0.1;
+  floorMesh.receiveShadow = true;
   scene.add(floorMesh);
 
   var floorBody = new CANNON.Body({ mass: 0 });
@@ -77,8 +93,9 @@
   // Ball
   var ballMesh = new THREE.Mesh(
     new THREE.SphereGeometry(0.15, 32, 32),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x333333 })
+    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x222222, emissiveIntensity: 0.35, roughness: 0.35, metalness: 0.05 })
   );
+  ballMesh.castShadow = true;
   scene.add(ballMesh);
 
   var ballBody = new CANNON.Body({ mass: 0.05 });
@@ -90,14 +107,14 @@
   // Cups - store meshes and bodies
   var cups = [];
 
-  function createCup(x, z, angle, color) {
+  function createCup(x, z, angle, color, cupIndex) {
     // Create a unique material for each cup
     var material = new THREE.MeshStandardMaterial({
       color: color,
       emissive: color,
-      emissiveIntensity: 0.3,
-      metalness: 0.1,
-      roughness: 0.8
+      emissiveIntensity: 0.35,
+      metalness: 0.25,
+      roughness: 0.35
     });
 
     var mesh = new THREE.Mesh(
@@ -106,6 +123,16 @@
     );
     mesh.position.set(x, 0.2, z);
     mesh.rotation.y = -angle;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    // Cup outline (for differentiation)
+    var edges = new THREE.EdgesGeometry(mesh.geometry, 15);
+    var outlineMat = new THREE.LineBasicMaterial({ color: 0x050505 });
+    var outline = new THREE.LineSegments(edges, outlineMat);
+    outline.scale.set(1.02, 1.02, 1.02);
+    mesh.add(outline);
+
     scene.add(mesh);
 
     var body = new CANNON.Body({ mass: 0 });
@@ -114,10 +141,11 @@
     body.quaternion.setFromEuler(0, -angle, 0);
     world.addBody(body);
 
-    cups.push({ mesh: mesh, body: body });
+    cups.push({ mesh: mesh, body: body, material: material, outline: outline, i: cupIndex });
   }
 
   // Create 3 racks of cups
+  var cupCounter = 0;
   for (var r = 0; r < 3; r++) {
     var angle = r * (2 * Math.PI / 3);
     var color = RACK_COLORS[r];
@@ -128,7 +156,7 @@
         var lz = row * ROW_OFFSET;
         var wx = lx * Math.cos(angle) - (lz + DISTANCE) * Math.sin(angle);
         var wz = lx * Math.sin(angle) + (lz + DISTANCE) * Math.cos(angle);
-        createCup(wx, wz, angle, color);
+        createCup(wx, wz, angle, color, cupCounter++);
       }
     }
   }
@@ -184,6 +212,17 @@
     for (var i = 0; i < cups.length; i++) {
       cups[i].mesh.position.copy(cups[i].body.position);
       cups[i].mesh.quaternion.copy(cups[i].body.quaternion);
+
+      // Psychedelic flow vibe: animated hue + emissive pulse + neon outline
+      var t = now * 0.001;
+      var idx = cups[i].i || i;
+      var hue = (t * 0.08 + idx * 0.07) % 1;
+      cups[i].material.color.setHSL(hue, 0.95, 0.52);
+      cups[i].material.emissive.setHSL((hue + 0.55) % 1, 1.0, 0.35);
+      cups[i].material.emissiveIntensity = 0.35 + 0.25 * Math.sin(t * 1.9 + idx);
+
+      // Complementary neon outline
+      cups[i].outline.material.color.setHSL((hue + 0.5) % 1, 1.0, 0.7);
     }
 
     renderer.render(scene, camera);
