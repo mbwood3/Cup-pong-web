@@ -1,7 +1,90 @@
-import React, { useEffect, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { ContactShadows, Edges } from "@react-three/drei";
 import { Physics, useSphere, usePlane, useCylinder } from "@react-three/cannon";
 import * as THREE from "three";
+
+function PsychedelicCupMaterial({ baseColor, seed, map }) {
+  const materialRef = useRef();
+  const shaderRef = useRef(null);
+
+  const baseHsl = useMemo(() => {
+    const c = new THREE.Color(baseColor);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    return hsl;
+  }, [baseColor]);
+
+  useEffect(() => {
+    const mat = materialRef.current;
+    if (!mat) return;
+
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.uniforms.uSeed = { value: seed };
+      shaderRef.current = shader;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        "void main() {",
+        "varying vec3 vPsyPos;\nvoid main() {"
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvPsyPos = position;"
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "void main() {",
+        "varying vec3 vPsyPos;\nuniform float uTime;\nuniform float uSeed;\nvoid main() {"
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        float t = uTime * 1.25 + uSeed * 0.73;
+        float flow = sin((vPsyPos.y * 9.0 + vPsyPos.x * 3.0 + vPsyPos.z * 3.0) + t * 2.0) * 0.5 + 0.5;
+        vec3 palette = 0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + (t + vPsyPos.y * 6.0));
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * palette, 0.75);
+        diffuseColor.rgb += palette * (0.12 * flow);
+        `
+      );
+    };
+
+    mat.needsUpdate = true;
+  }, [seed]);
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (shaderRef.current) shaderRef.current.uniforms.uTime.value = t;
+
+    const mat = materialRef.current;
+    if (!mat) return;
+
+    const hue =
+      (baseHsl.h +
+        0.12 * Math.sin(t * 0.35 + seed * 0.9) +
+        (seed * 0.03) % 1) %
+      1;
+
+    mat.color.setHSL((hue + 1) % 1, Math.min(1, baseHsl.s + 0.35), Math.min(0.65, baseHsl.l + 0.15));
+    mat.emissive.setHSL((hue + 0.55) % 1, 1, 0.35);
+    mat.emissiveIntensity = 0.35 + 0.25 * Math.sin(t * 1.7 + seed);
+  });
+
+  return (
+    <meshPhysicalMaterial
+      ref={materialRef}
+      map={map || undefined}
+      roughness={0.35}
+      metalness={0.25}
+      clearcoat={0.9}
+      clearcoatRoughness={0.1}
+      iridescence={1}
+      iridescenceIOR={1.3}
+      iridescenceThicknessRange={[100, 400]}
+      toneMapped={false}
+    />
+  );
+}
 
 // 1. The Floor
 function Floor() {
@@ -10,9 +93,9 @@ function Floor() {
     position: [0, -0.1, 0] 
   }));
   return (
-    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]}>
+    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]} receiveShadow>
       <circleGeometry args={[10, 64]} />
-      <meshStandardMaterial color="#333" />
+      <meshStandardMaterial color="#2d2d44" roughness={0.95} metalness={0.05} />
     </mesh>
   );
 }
@@ -77,15 +160,15 @@ function PingPongBall({ resetTrigger }) {
   }, [api]);
 
   return (
-    <mesh ref={ref}>
+    <mesh ref={ref} castShadow>
       <sphereGeometry args={[0.15, 32, 32]} />
-      <meshStandardMaterial color="white" />
+      <meshStandardMaterial color="white" emissive="#222" emissiveIntensity={0.35} roughness={0.35} metalness={0.05} />
     </mesh>
   );
 }
 
 // 3. The Static Cup (with optional logo texture)
-function Cup({ position, rotation, color, logo }) {
+function Cup({ position, rotation, color, logo, seed = 0 }) {
   const [ref] = useCylinder(() => ({
     mass: 0, // Static = Immovable (like a wall)
     position: position,
@@ -94,6 +177,13 @@ function Cup({ position, rotation, color, logo }) {
   }));
 
   const [texture, setTexture] = useState(null);
+  const outlineColor = useMemo(() => {
+    const c = new THREE.Color(color);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    const outline = new THREE.Color().setHSL((hsl.h + 0.5) % 1, 1, 0.68);
+    return outline.getStyle();
+  }, [color]);
 
   useEffect(() => {
     if (!logo) return;
@@ -124,22 +214,18 @@ function Cup({ position, rotation, color, logo }) {
   }, [logo]);
 
   return (
-    <mesh ref={ref}>
+    <mesh ref={ref} castShadow receiveShadow>
       <cylinderGeometry args={[0.25, 0.15, 0.6, 32]} />
-      <meshStandardMaterial
-        // Keep the cup's base color even after the logo texture loads.
-        // Otherwise the async texture load "flips" cups to pure white.
-        color={color}
-        emissive={color}
-        emissiveIntensity={0.25}
-        map={texture || undefined}
-      />
+      <PsychedelicCupMaterial baseColor={color} seed={seed} map={texture} />
+      {/* Outline + neon rim for cup differentiation */}
+      <Edges scale={1.01} threshold={15} color="#050505" />
+      <Edges scale={1.045} threshold={15} color={outlineColor} />
     </mesh>
   );
 }
 
 // 4. The Rack (Now with World Coordinate Math)
-function CupRack({ angle, color, logo }) {
+function CupRack({ angle, color, logo, seedOffset = 0 }) {
   const cups = [];
   let k = 0;
   
@@ -168,6 +254,7 @@ function CupRack({ angle, color, logo }) {
       const worldX = (localX * Math.cos(theta)) - ((localZ + DISTANCE_FROM_CENTER) * Math.sin(theta));
       const worldZ = (localX * Math.sin(theta)) + ((localZ + DISTANCE_FROM_CENTER) * Math.cos(theta));
       
+      const seed = seedOffset + k;
       cups.push(
         <Cup 
           key={k++} 
@@ -175,6 +262,7 @@ function CupRack({ angle, color, logo }) {
           rotation={[0, -angle, 0]} // Rotate the cup to match the rack
           color={color}
           logo={logo}
+          seed={seed}
         />
       );
     }
@@ -188,9 +276,28 @@ export default function App() {
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: "#222", touchAction: "none" }}>
-      <Canvas camera={{ position: [0, 8, 12], fov: 45 }}>
-        <ambientLight intensity={0.5} />
-        <pointLight position={[10, 10, 10]} />
+      <Canvas
+        shadows
+        camera={{ position: [0, 8, 12], fov: 45 }}
+        gl={{ antialias: true }}
+        dpr={[1, 2]}
+      >
+        <ambientLight intensity={0.22} />
+        <directionalLight
+          position={[6, 12, 6]}
+          intensity={1.2}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-camera-near={1}
+          shadow-camera-far={30}
+          shadow-camera-left={-10}
+          shadow-camera-right={10}
+          shadow-camera-top={10}
+          shadow-camera-bottom={-10}
+          shadow-bias={-0.0002}
+        />
+        <pointLight position={[-6, 8, -6]} intensity={0.35} />
         
         <Physics gravity={[0, -9.8, 0]} iterations={20}>
           <Floor />
@@ -201,11 +308,14 @@ export default function App() {
              2*PI/3 = 120 degrees
              4*PI/3 = 240 degrees
           */}
-          <CupRack angle={0} color="#ff4444" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-red.svg`} />
-          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-blue.svg`} />
-          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-green.svg`} /> 
+          <CupRack angle={0} color="#ff4444" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-red.svg`} seedOffset={0} />
+          <CupRack angle={(2 * Math.PI) / 3} color="#4444ff" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-blue.svg`} seedOffset={100} />
+          <CupRack angle={(4 * Math.PI) / 3} color="#44ff44" logo={`${process.env.PUBLIC_URL || ""}/logos/placeholder-green.svg`} seedOffset={200} /> 
 
         </Physics>
+
+        {/* Soft extra depth under the action */}
+        <ContactShadows position={[0, -0.095, 0]} opacity={0.55} scale={18} blur={3.25} far={10} />
       </Canvas>
       
       {/* ... Button Code (Keep as is) ... */}
