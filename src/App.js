@@ -480,9 +480,9 @@ function PingPongBall({ resetTrigger }) {
       const swipeX = deltaX;
       const power = Math.min(1, swipeY / 420); // normalize
 
-      const vZ = -(2.4 + power * 5.6);
-      const vY = 1.55 + power * 6.9;
-      const vX = THREE.MathUtils.clamp((swipeX / timeDiff) * 1.8, -2.2, 2.2);
+      const vZ = -(1.7 + power * 4.2);
+      const vY = 2.2 + power * 8.6;
+      const vX = THREE.MathUtils.clamp((swipeX / timeDiff) * 1.5, -1.9, 1.9);
 
       api.velocity.set(vX, vY, vZ);
       // Add a bit of "english" (spin) for feel
